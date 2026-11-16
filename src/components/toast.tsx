@@ -24,7 +24,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={push}>
       {children}
-      <div className="no-print pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(380px,calc(100vw-32px))] flex-col gap-2" role="region" aria-live="polite" aria-label="Notifications">
+      <div className="no-print pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-[60] flex w-[min(380px,calc(100vw-32px))] flex-col gap-2" role="region" aria-live="polite" aria-label="Notifications">
         {toasts.map((t) => {
           const Icon = t.tone === 'ok' ? CheckCircle2 : t.tone === 'error' ? TriangleAlert : Info
           const content = (

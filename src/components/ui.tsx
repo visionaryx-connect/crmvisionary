@@ -189,12 +189,12 @@ export function Section({ title, description, actions, children, className }: { 
   return (
     <section className={cx('mb-8', className)}>
       {(title || actions) && (
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
+          <div className="min-w-0 flex-1 basis-[14rem]">
             {title && <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.16em] text-ink-2">{title}</h2>}
             {description && <p className="mt-0.5 text-[12.5px] text-muted">{description}</p>}
           </div>
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+          {actions && <div className="flex shrink-0 flex-wrap items-center gap-2 whitespace-nowrap">{actions}</div>}
         </div>
       )}
       {children}

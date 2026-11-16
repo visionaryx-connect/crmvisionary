@@ -66,7 +66,7 @@ export function NextStep({ title, body, action, auto }: { title: string; body: R
         <p className="text-[12.5px] text-ink-2">{body}</p>
         {auto && (
           <p className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted">
-            <Sparkles className="size-3" /> {auto}
+            <Sparkles className="size-3 shrink-0" /> <span className="min-w-0">{auto}</span>
           </p>
         )}
       </div>

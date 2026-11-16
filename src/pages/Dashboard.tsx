@@ -77,11 +77,11 @@ export default function Dashboard() {
 
       {d?.unverifiedHolidays ? (
         <Link to="/settings?tab=holidays" className="mb-6 flex items-center gap-3 rounded-lg border border-highlight/40 bg-highlight-soft/60 px-4 py-2.5 text-[13px] text-highlight-ink hover:bg-highlight-soft">
-          <ShieldAlert className="size-4" />
-          <span>
+          <ShieldAlert className="size-4 shrink-0" />
+          <span className="min-w-0">
             <span className="font-medium">{d.unverifiedHolidays} holiday record(s)</span> await verification against the official government notification. Unverified holidays are not applied to attendance or leave.
           </span>
-          <ArrowUpRight className="ml-auto size-4" />
+          <ArrowUpRight className="ml-auto size-4 shrink-0" />
         </Link>
       ) : null}
 

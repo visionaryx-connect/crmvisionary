@@ -32,7 +32,7 @@ export default function Account() {
   return (
     <div>
       <PageHeader eyebrow="Account" title="Account & security" />
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
         <div className="space-y-8">
           <Section title="Profile">
             <Panel className="p-4"><KeyValue items={[{ label: 'Name', value: me.user.name }, { label: 'Email', value: me.user.email }, { label: 'Employee ID', value: me.user.employeeCode }, { label: 'Roles', value: me.roles.map((r) => r.name).join(', ') }]} /><Link to={`/team/${me.user.id}`} className="link mt-3 inline-block text-[13px]">Edit contact details</Link></Panel>

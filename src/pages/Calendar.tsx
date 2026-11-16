@@ -377,7 +377,7 @@ export default function CalendarPage() {
       {view === 'agenda' && (
         <div className="space-y-4">
           {Array.from({ length: 30 }, (_, i) => addDays(from, i)).filter((d) => (byDay.get(d) ?? []).length > 0).map((d) => (
-            <section key={d} className="grid gap-3 sm:grid-cols-[150px_1fr]">
+            <section key={d} className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
               <div className="pt-1">
                 <div className={cx('font-display font-bold tracking-[-0.02em] text-[17px]', d === today ? 'text-accent' : 'text-ink')}>{dayLabel(d, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
                 {dayInfo.get(d) && !dayInfo.get(d)!.working && <div className="text-[11.5px] text-muted">{dayInfo.get(d)!.label ?? 'Non-working day'}</div>}

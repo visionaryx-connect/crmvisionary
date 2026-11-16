@@ -68,6 +68,8 @@
 	// Bindings are not inherited between environments, so each one declares its own resources.
 	"env": {
 		"staging": {
+			// Workers AI powers "Assign task with AI" (drafts only). Usage is billed per request beyond the free allocation.
+			"ai": { "binding": "AI" },
 			"vars": {
 				"APP_ENV": "staging",
 				"APP_ORIGIN": "https://crm-staging.visionary-x.in",
@@ -108,6 +110,7 @@
 			}
 		},
 		"production": {
+			"ai": { "binding": "AI" },
 			"vars": {
 				"APP_ENV": "production",
 				"APP_ORIGIN": "https://crm.visionary-x.in",

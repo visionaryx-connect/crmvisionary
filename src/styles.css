@@ -104,6 +104,10 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+  /* Icons keep their size when text beside them wraps on narrow (mobile) screens. */
+  svg.lucide {
+    flex-shrink: 0;
+  }
 }
 
 @layer components {

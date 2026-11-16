@@ -3,13 +3,16 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell, BarChart3, Briefcase, CalendarDays, ChevronsLeft, ChevronsRight, CircleUserRound, ClipboardCheck, FileStack, FolderKanban, LayoutGrid, LogOut, Menu,
-  Compass, Plus, Search, Settings, ShieldCheck, Users, UsersRound, Clock3, X,
+  Compass, Download, Plus, Search, Settings, ShieldCheck, Sparkles, Users, UsersRound, Clock3, X,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useRealtimeStatus } from '@/lib/realtime'
 import { Avatar, BrandLockup, BrandMark, cx, Kbd } from '@/components/ui'
 import { CommandPalette } from './CommandPalette'
+import { AiTaskDialog } from '@/components/AiTaskDialog'
+import { InstallAppDialog } from '@/components/InstallApp'
+import { isStandalone } from '@/lib/pwa'
 
 interface NavItem {
   to: string
@@ -25,6 +28,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { to: '/', label: 'Overview', icon: LayoutGrid, end: true },
       { to: '/tasks', label: 'My work', icon: ClipboardCheck },
+      { to: '/today', label: "Today's tasks", icon: CalendarDays },
       { to: '/projects', label: 'Projects', icon: FolderKanban },
       { to: '/clients', label: 'Clients', icon: Briefcase },
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
@@ -91,7 +95,7 @@ function Sidebar({ collapsed, onToggle, mobile, onNavigate }: { collapsed: boole
             <div key={g.group} className="mb-4">
               {!collapsed && <div className="mb-1 px-4 text-[10px] font-medium uppercase tracking-[0.2em] text-faint">{g.group}</div>}
               <ul className="space-y-px px-2">
-                {items.map((i) => (
+            {items.map((i) => (
                   <li key={i.to}>
                     <NavLink
                       to={i.to}
@@ -144,6 +148,7 @@ function LiveIndicator() {
 function UserMenu() {
   const { me } = useAuth()
   const [open, setOpen] = useState(false)
+  const [installOpen, setInstallOpen] = useState(false)
   const nav = useNavigate()
   const qc = useQueryClient()
   const logout = async () => {
@@ -177,12 +182,18 @@ function UserMenu() {
             <button role="menuitem" className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-[13px] hover:bg-canvas" onClick={() => { setOpen(false); nav('/account') }}>
               <ShieldCheck className="size-4 text-muted" /> Account & security
             </button>
+            {!isStandalone() && (
+              <button role="menuitem" className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-[13px] hover:bg-canvas" onClick={() => { setOpen(false); setInstallOpen(true) }}>
+                <Download className="size-4 text-muted" /> Install app
+              </button>
+            )}
             <button role="menuitem" className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-[13px] text-danger hover:bg-danger-bg" onClick={logout}>
               <LogOut className="size-4" /> Sign out
             </button>
           </div>
         </>
       )}
+      <InstallAppDialog open={installOpen} onClose={() => setInstallOpen(false)} />
     </div>
   )
 }
@@ -190,6 +201,7 @@ function UserMenu() {
 function QuickCreate() {
   const { can } = useAuth()
   const [open, setOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const nav = useNavigate()
   const items = [
     can('projects.create') && { label: 'New project', to: '/projects?new=1' },
@@ -206,6 +218,8 @@ function QuickCreate() {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div role="menu" className="absolute right-0 z-40 mt-1 w-48 animate-rise rounded-lg border border-line bg-surface p-1 shadow-pop">
+            <button role="menuitem" onClick={() => { setOpen(false); setAiOpen(true) }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-[13px] font-medium hover:bg-canvas"><Sparkles className="size-4" /> Assign task with AI</button>
+            <div className="my-1 border-t border-line" />
             {items.map((i) => (
               <button key={i.to} role="menuitem" onClick={() => { setOpen(false); nav(i.to) }} className="block w-full rounded px-3 py-2 text-left text-[13px] hover:bg-canvas">
                 {i.label}
@@ -214,6 +228,7 @@ function QuickCreate() {
           </div>
         </>
       )}
+      <AiTaskDialog open={aiOpen} onClose={() => setAiOpen(false)} />
     </div>
   )
 }
@@ -256,17 +271,17 @@ export function AppShell({ children }: { children?: ReactNode }) {
       </div>
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-ink/40" onClick={() => setMobileOpen(false)} />
-          <div className="relative h-full w-[240px] animate-rise">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" onClick={() => setMobileOpen(false)} />
+          <div className="relative flex h-full w-[240px] max-w-[85vw] flex-col bg-canvas animate-rise pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]">
             <Sidebar collapsed={false} mobile onNavigate={() => setMobileOpen(false)} />
-            <button onClick={() => setMobileOpen(false)} className="absolute right-2 top-3 text-ink/80" aria-label="Close menu">
+            <button onClick={() => setMobileOpen(false)} className="absolute right-2 top-[calc(env(safe-area-inset-top)+0.75rem)] text-ink/80" aria-label="Close menu">
               <X className="size-5" />
             </button>
           </div>
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print flex h-14 shrink-0 items-center gap-3 border-b border-line bg-canvas/85 px-4 backdrop-blur md:px-6">
+        <header className="no-print flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-3 border-b border-line bg-canvas/85 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] backdrop-blur md:pl-6 md:pr-6">
           <button className="-ml-1 inline-flex size-8 items-center justify-center rounded-md hover:bg-subtle md:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu">
             <Menu className="size-5" />
           </button>
@@ -286,7 +301,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </div>
         </header>
         <main id="main" className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1320px] px-4 py-6 md:px-8 md:py-8">{children ?? <Outlet />}</div>
+          <div className="mx-auto w-full max-w-[1320px] px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:px-8 md:py-8">{children ?? <Outlet />}</div>
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

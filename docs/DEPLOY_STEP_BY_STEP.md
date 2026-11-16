@@ -327,6 +327,16 @@ It runs at `crm-staging.visionary-x.in`.
 | Activation link "expired or already used" | Older than 72 h or already used | Run Step 10 again with a new email, or issue a new link from Users & roles |
 | A `wrangler d1 …` command touches the wrong database | Wrangler switched to the generated config after a build | Always include `--env production -c wrangler.jsonc` as shown |
 
+## Install on phones (Android and iPhone)
+
+The app is a Progressive Web App: once deployed on `https://crm.visionary-x.in`, staff can add it to their home screen. It then opens full-screen with its own icon, like a normal app. There is nothing to publish in an app store. Data is never cached offline; the app always talks to the live server.
+
+**Android (Chrome):** open https://crm.visionary-x.in and sign in. Tap the **⋮** menu → **Install app** (or **Add to Home screen**). Inside the app you can also use the avatar menu → **Install app**.
+
+**iPhone / iPad (Safari only):** open https://crm.visionary-x.in in **Safari** and sign in. Tap **Share** → **Add to Home Screen** → **Add**. Chrome on iPhone can do the same from its Share menu on iOS 16.4 and later.
+
+After a deploy, the installed app picks up the new version the next time it is opened while online. To regenerate the icons after a logo change, run `node scripts/make-icons.mjs`.
+
 ## What it costs
 
 On **Workers Paid (US$5/month)**, a team of 10–30 people should stay inside the included usage for Workers, D1 and Durable Objects. R2 is free up to 10 GB of files. There are no other required charges.
