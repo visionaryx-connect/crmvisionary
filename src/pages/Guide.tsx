@@ -63,11 +63,37 @@ export default function Guide() {
           ))}
         </div>
         <ul className="mt-4 space-y-1 text-[12.5px] text-muted">
-          <li>· A task counts towards project progress only when it is <span className="text-ink">Done</span> — for reviewed tasks that means approved, not just submitted.</li>
+          <li>· A task counts towards project progress only when its work is <span className="text-ink">approved</span> — not just submitted. Count-based tasks count each approved part.</li>
           <li>· Blocked is a side-track: say what’s in the way; reviewers are notified. Unblock to continue.</li>
           <li>· Tasks with unfinished dependencies can’t be started or submitted.</li>
           <li>· Nobody can approve their own submission (unless they manage the project).</li>
         </ul>
+      </Section>
+
+      <Section title="How project progress is counted" description="Progress is never typed in — it is calculated from approved work. The project's Overview tab shows the full breakdown.">
+        <div className="grid gap-3 md:grid-cols-2">
+          <Panel className="p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink">Weightage — each task has a % share</p>
+            <p className="mt-2 text-[13px] text-ink-2">Client <span className="text-ink">Biotonic</span>, project <span className="text-ink">Biotonic web</span>. The project manager splits the website into tasks and gives each a share:</p>
+            <ul className="mt-2 space-y-1 font-mono text-[12.5px] text-ink-2">
+              <li>Website layout ··········· 20%</li>
+              <li>Inner pages ·············· 30%</li>
+              <li>Changes &amp; fixes ········· 20%</li>
+              <li>Launch ··················· 30%</li>
+            </ul>
+            <p className="mt-2 text-[13px] text-ink-2">When the layout is <span className="text-ink">approved</span>, the project shows <span className="text-ink">20%</span>. After the inner pages are approved too: <span className="text-ink">50%</span>. Submitting alone doesn’t count.</p>
+          </Panel>
+          <Panel className="p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink">Count-based tasks — delivered in parts</p>
+            <p className="mt-2 text-[13px] text-ink-2">The client needs <span className="text-ink">4 videos</span> (task worth 40%). The editor submits 2; the reviewer approves them:</p>
+            <ul className="mt-2 space-y-1 font-mono text-[12.5px] text-ink-2">
+              <li>Task: 2 / 4 videos → 50% done</li>
+              <li>Project: 40% × 50% = +20%</li>
+            </ul>
+            <p className="mt-2 text-[13px] text-ink-2">The task stays In progress until all 4 are approved, then moves to Done. Tick <span className="text-ink">Count-based task</span> when creating it.</p>
+          </Panel>
+        </div>
+        <p className="mt-3 text-[12.5px] text-muted">If the shares don’t add up to exactly 100%, they are scaled automatically — the Overview tab offers a one-click “Make it 100%”. Other methods: Equal (every task counts the same) and Milestones.</p>
       </Section>
 
       <Section title="What happens automatically" description="Admins can switch each rule off in Settings → Automations. Every automatic change appears in the project’s Activity tab.">

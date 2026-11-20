@@ -127,7 +127,7 @@ export const projectSchema = z.object({
   targetDate: optDate,
   status: z.enum(PROJECT_STATUSES).default('planning'),
   priority: z.enum(PRIORITIES).default('medium'),
-  progressMode: z.enum(['equal', 'effort', 'milestone']).default('equal'),
+  progressMode: z.enum(['equal', 'effort', 'milestone']).default('effort'),
   estimatedHours: z.number().min(0).max(100000).nullable().optional(),
   clientStatusNote: trimmed(1000).default(''),
 }).refine((p) => !p.startDate || !p.targetDate || p.targetDate >= p.startDate, { message: 'Target date must be on or after the start date', path: ['targetDate'] })
@@ -181,6 +181,9 @@ export const taskSchema = z.object({
   dueDate: optDate,
   estimateHours: z.number().min(0).max(1000).nullable().optional(),
   weight: z.number().positive().max(100).default(1),
+  /** Count-based work, e.g. 4 videos. Null = a single piece of work. */
+  targetQty: z.number().int().min(1).max(1000).nullable().optional(),
+  qtyUnit: trimmed(30).default(''),
   requiresApproval: z.boolean().default(true),
   dependsOn: z.array(id).max(30).default([]),
 }).refine((t) => !t.startDate || !t.dueDate || t.dueDate >= t.startDate, { message: 'Due date must be on or after the start date', path: ['dueDate'] })
@@ -195,6 +198,10 @@ export const taskPatchSchema = z.object({
   dueDate: optDate,
   estimateHours: z.number().min(0).max(1000).nullable().optional(),
   weight: z.number().positive().max(100).optional(),
+  targetQty: z.number().int().min(1).max(1000).nullable().optional(),
+  qtyUnit: trimmed(30).optional(),
+  /** Manual correction of approved units (managers only). */
+  approvedQty: z.number().int().min(0).max(1000).optional(),
   requiresApproval: z.boolean().optional(),
   dependsOn: z.array(id).max(30).optional(),
 })
@@ -203,10 +210,16 @@ export const taskStatusSchema = z.object({
   note: trimmed(1000).default(''),
   blockedReason: trimmed(500).optional(),
 })
-export const taskSubmitSchema = z.object({ note: trimmed(2000).default('') })
+export const taskSubmitSchema = z.object({
+  note: trimmed(2000).default(''),
+  /** Count-based tasks: units delivered in this submission (defaults to all remaining). */
+  qty: z.number().int().min(1).max(1000).optional(),
+})
 export const taskReviewSchema = z.object({
   decision: z.enum(['approved', 'revision_requested']),
   note: trimmed(2000).default(''),
+  /** Count-based tasks: units the reviewer accepts (defaults to the units submitted). */
+  qty: z.number().int().min(1).max(1000).optional(),
 }).refine((r) => r.decision === 'approved' || r.note.length > 0, { message: 'Explain what needs to change', path: ['note'] })
 export const taskBulkSchema = z.object({
   taskIds: z.array(id).min(1).max(100),

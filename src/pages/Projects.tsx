@@ -30,9 +30,9 @@ export function ProjectDialog({ open, onClose, clientId }: { open: boolean; onCl
   const services = useServiceCategories()
   const toast = useToast()
   const nav = useNavigate()
-  const form = useForm<ProjectForm, unknown, z.output<typeof projectSchema>>({ resolver: zodResolver(projectSchema), defaultValues: { status: 'planning', priority: 'medium', progressMode: 'equal', description: '', scope: '', clientStatusNote: '', clientId: clientId ?? '', managerId: me.user.id } })
+  const form = useForm<ProjectForm, unknown, z.output<typeof projectSchema>>({ resolver: zodResolver(projectSchema), defaultValues: { status: 'planning', priority: 'medium', progressMode: 'effort', description: '', scope: '', clientStatusNote: '', clientId: clientId ?? '', managerId: me.user.id } })
   useEffect(() => {
-    if (open) form.reset({ status: 'planning', priority: 'medium', progressMode: 'equal', description: '', scope: '', clientStatusNote: '', clientId: clientId ?? '', managerId: me.user.id })
+    if (open) form.reset({ status: 'planning', priority: 'medium', progressMode: 'effort', description: '', scope: '', clientStatusNote: '', clientId: clientId ?? '', managerId: me.user.id })
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   const err = form.formState.errors
   const submit = form.handleSubmit(async (v) => {
@@ -62,7 +62,7 @@ export function ProjectDialog({ open, onClose, clientId }: { open: boolean; onCl
         <Field label="Target deadline" error={err.targetDate?.message}><Input type="date" {...form.register('targetDate', nullable)} /></Field>
         <Field label="Status"><Select {...form.register('status')}>{PROJECT_STATUSES.filter((s) => !['completed', 'archived'].includes(s)).map((s) => <option key={s} value={s}>{PROJECT_STATUS_LABEL[s]}</option>)}</Select></Field>
         <Field label="Progress method" hint="How task completion rolls up into project progress.">
-          <Select {...form.register('progressMode')}><option value="equal">Equal — each task counts once</option><option value="effort">Effort — weighted by estimates</option><option value="milestone">Milestones — weighted by milestone</option></Select>
+          <Select {...form.register('progressMode')}><option value="effort">Weightage — each task has a % share</option><option value="equal">Equal — every task counts the same</option><option value="milestone">Milestones — weighted by milestone</option></Select>
         </Field>
         <Field label="Estimated effort (hours)" error={err.estimatedHours?.message}><Input type="number" min={0} step="1" {...form.register('estimatedHours', { setValueAs: (v) => (v === '' ? null : Number(v)) })} /></Field>
         <Field label="Description" className="sm:col-span-2"><Textarea rows={2} {...form.register('description')} /></Field>

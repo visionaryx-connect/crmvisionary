@@ -67,6 +67,48 @@ describe('task workflow, progress and approvals', () => {
     expect(snaps.results.at(-1)?.progress).toBe(50)
   })
 
+  it('weightage: approved tasks add their % share to the project', async () => {
+    const { pm, dev, projectId } = await setup()
+    await call(pm.agent, 'PATCH', `/api/projects/${projectId}`, { progressMode: 'effort' })
+    const layout = await call(pm.agent, 'POST', '/api/tasks', { projectId, title: 'Website layout', responsibleId: dev.id, weight: 20 })
+    await call(pm.agent, 'POST', '/api/tasks', { projectId, title: 'Inner pages', responsibleId: dev.id, weight: 30 })
+    await call(pm.agent, 'POST', '/api/tasks', { projectId, title: 'Launch', responsibleId: dev.id, weight: 50 })
+    await call(dev.agent, 'POST', `/api/tasks/${layout.json.id}/submit`, { note: 'layout ready' })
+    expect((await call(pm.agent, 'GET', `/api/projects/${projectId}`)).json.project.progress).toBe(0)
+    await call(pm.agent, 'POST', `/api/tasks/${layout.json.id}/review`, { decision: 'approved' })
+    expect((await call(pm.agent, 'GET', `/api/projects/${projectId}`)).json.project.progress).toBe(20)
+    const detail = await call(pm.agent, 'GET', `/api/tasks/${layout.json.id}`)
+    expect(detail.json.projectShare).toBe(20)
+  })
+
+  it('count-based tasks: 2 of 4 videos approved counts half the task', async () => {
+    const { pm, dev, projectId } = await setup()
+    await call(pm.agent, 'PATCH', `/api/projects/${projectId}`, { progressMode: 'effort' })
+    const videos = await call(pm.agent, 'POST', '/api/tasks', { projectId, title: 'Reels', responsibleId: dev.id, weight: 40, targetQty: 4, qtyUnit: 'videos' })
+    await call(pm.agent, 'POST', '/api/tasks', { projectId, title: 'Strategy', responsibleId: dev.id, weight: 60 })
+    expect(videos.status).toBe(201)
+    // Cannot submit more than remain.
+    expect((await call(dev.agent, 'POST', `/api/tasks/${videos.json.id}/submit`, { qty: 5 })).status).toBe(422)
+    expect((await call(dev.agent, 'POST', `/api/tasks/${videos.json.id}/submit`, { qty: 2, note: 'first two edits' })).status).toBe(200)
+    expect((await call(pm.agent, 'POST', `/api/tasks/${videos.json.id}/review`, { decision: 'approved' })).status).toBe(200)
+    let t = await call(pm.agent, 'GET', `/api/tasks/${videos.json.id}`)
+    expect(t.json.task.status).toBe('in_progress')
+    expect(t.json.task.approved_qty).toBe(2)
+    expect((await call(pm.agent, 'GET', `/api/projects/${projectId}`)).json.project.progress).toBe(20)
+    // Rest delivered; reviewer approves only 1 of the 2, then the last one.
+    await call(dev.agent, 'POST', `/api/tasks/${videos.json.id}/submit`, {})
+    expect((await call(pm.agent, 'POST', `/api/tasks/${videos.json.id}/review`, { decision: 'approved', qty: 1 })).status).toBe(200)
+    expect((await call(pm.agent, 'GET', `/api/projects/${projectId}`)).json.project.progress).toBe(30)
+    await call(dev.agent, 'POST', `/api/tasks/${videos.json.id}/submit`, {})
+    await call(pm.agent, 'POST', `/api/tasks/${videos.json.id}/review`, { decision: 'approved' })
+    t = await call(pm.agent, 'GET', `/api/tasks/${videos.json.id}`)
+    expect(t.json.task.status).toBe('completed')
+    expect(t.json.task.approved_qty).toBe(4)
+    expect((await call(pm.agent, 'GET', `/api/projects/${projectId}`)).json.project.progress).toBe(40)
+    // Approved count can't exceed the target.
+    expect((await call(pm.agent, 'PATCH', `/api/tasks/${videos.json.id}`, { targetQty: 3 })).status).toBe(422)
+  })
+
   it('reviewers cannot approve their own submissions; non-reviewers cannot review', async () => {
     const { pm, dev, lead, projectId } = await setup()
     const t = await call(pm.agent, 'POST', '/api/tasks', { projectId, title: 'Lead task', responsibleId: lead.id })

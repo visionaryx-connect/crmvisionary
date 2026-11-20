@@ -9,7 +9,8 @@ Progress is always derived from task records; nobody can type a percentage.
 - Cancelled tasks are excluded from numerator and denominator.
 - A task counts as done only when its status is **Completed**. Tasks that require approval reach Completed only through a reviewer's approval, so submitted-but-unapproved work never moves progress.
 - **Equal**: completed ÷ applicable × 100.
-- **Effort**: each task is weighted by its approved estimate (hours); tasks without an estimate use their complexity weight (default 1).
+- **Weightage** (stored as mode `effort`, the default for new projects): each task's `weight` is its % share of the project, set by the project manager. Progress = Σ(share × task completion) ÷ Σ shares, so shares that don't total 100 are scaled.
+- **Count-based tasks** (`target_qty`, e.g. 4 videos): each approval adds the accepted units to `approved_qty`; the task is `approved_qty ÷ target_qty` complete and counts that fraction of its share in every mode. It returns to In progress after a partial approval and becomes Completed when all units are approved. Reviewers may accept fewer units than were submitted. Marking a count-based task complete sets `approved_qty` to the target.
 - **Milestone**: each milestone contributes its weight; tasks inside a milestone count equally; a milestone without tasks counts only when marked Achieved; tasks with no milestone form an implicit bucket of weight 1.
 - With no applicable tasks, the UI says "No tasks yet" instead of 0%.
 - Every change writes a progress snapshot, which gives reports exact progress "as of" any date.

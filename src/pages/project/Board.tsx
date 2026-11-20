@@ -7,6 +7,7 @@ import { api, ApiError } from '@/lib/api'
 import { Avatar, Button, Dialog, Field, Input, cx } from '@/components/ui'
 import { DueText, PriorityMark } from '@/components/status'
 import { useToast } from '@/components/toast'
+import { qtyText } from './ProgressBreakdown'
 import type { TaskRow } from './types'
 
 /** One-line meaning of each column, shown under its title. */
@@ -130,6 +131,7 @@ export function Board({ tasks, projectId, canManage, onNew }: { tasks: TaskRow[]
                         {t.status === 'blocked' && t.blocked_reason && <p className="mt-1.5 line-clamp-2 rounded bg-danger-bg px-1.5 py-1 text-[11.5px] text-danger">{t.blocked_reason}</p>}
                         <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
                           <span className="font-mono">#{t.number}</span>
+                          {t.target_qty ? <span className="inline-flex items-center gap-0.5 font-mono" title="Approved / required">{qtyText(t)}</span> : null}
                           {t.subtask_total > 0 && <span className="inline-flex items-center gap-0.5"><CheckSquare className="size-3" />{t.subtask_done}/{t.subtask_total}</span>}
                           {t.comment_count > 0 && <span className="inline-flex items-center gap-0.5"><MessageSquare className="size-3" />{t.comment_count}</span>}
                           {t.open_dependencies > 0 && <span className="inline-flex items-center gap-0.5 text-warn" title="Waiting on dependencies"><Link2 className="size-3" />{t.open_dependencies}</span>}

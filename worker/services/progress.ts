@@ -12,7 +12,7 @@ import { publish, rooms, type Waiter } from './realtime'
 export async function recalcProgress(env: Env, waiter: Waiter, projectId: string, opts: { automate?: boolean } = {}): Promise<number | null> {
   const project = await one<{ progress_mode: 'equal' | 'effort' | 'milestone'; progress: number }>(env.DB, 'SELECT progress_mode, progress FROM projects WHERE id = ?', projectId)
   if (!project) return null
-  const tasks = await many<ProgressTask>(env.DB, 'SELECT status, estimate_hours, weight, milestone_id FROM tasks WHERE project_id = ?', projectId)
+  const tasks = await many<ProgressTask>(env.DB, 'SELECT status, estimate_hours, weight, milestone_id, target_qty, approved_qty FROM tasks WHERE project_id = ?', projectId)
   const milestones = await many<ProgressMilestone>(env.DB, 'SELECT id, weight, status FROM milestones WHERE project_id = ?', projectId)
   const r = calculateProgress(project.progress_mode, tasks, milestones)
   const last = await one<{ progress: number; total_units: number }>(env.DB, 'SELECT progress, total_units FROM project_progress_snapshots WHERE project_id = ? ORDER BY recorded_at DESC LIMIT 1', projectId)

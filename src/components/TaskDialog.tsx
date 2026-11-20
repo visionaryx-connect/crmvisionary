@@ -9,6 +9,10 @@ export interface ProjectContext {
   projectId: string
   members: { user_id: string; name: string; role: string }[]
   milestones: { id: string; title: string }[]
+  /** Project progress method; 'effort' is shown as "Weightage". */
+  progressMode?: 'equal' | 'effort' | 'milestone'
+  /** Weightage (%) not yet given to any task — suggested for a new task. */
+  remainingWeight?: number
 }
 
 interface TaskValues {
@@ -22,16 +26,22 @@ interface TaskValues {
   dueDate: string
   estimateHours: string
   weight: string
+  countBased: boolean
+  targetQty: string
+  qtyUnit: string
   requiresApproval: boolean
   dependsOn: string[]
   status: 'todo' | 'backlog'
 }
 
-const empty: TaskValues = { title: '', description: '', milestoneId: '', priority: 'medium', responsibleId: '', assigneeIds: [], startDate: '', dueDate: '', estimateHours: '', weight: '1', requiresApproval: true, dependsOn: [], status: 'todo' }
+const empty: TaskValues = { title: '', description: '', milestoneId: '', priority: 'medium', responsibleId: '', assigneeIds: [], startDate: '', dueDate: '', estimateHours: '', weight: '1', countBased: false, targetQty: '', qtyUnit: '', requiresApproval: true, dependsOn: [], status: 'todo' }
 
 /** Create or edit a task. Server-side validation is authoritative; errors map back onto fields. */
 export function TaskDialog({ open, onClose, ctx, taskId, initial, onSaved }: { open: boolean; onClose: () => void; ctx: ProjectContext; taskId?: string; initial?: Partial<TaskValues>; onSaved?: (id: string) => void }) {
-  const [v, setV] = useState<TaskValues>({ ...empty, ...initial })
+  const weighted = ctx.progressMode === 'effort'
+  const suggested = (): Partial<TaskValues> =>
+    !taskId && weighted ? { weight: String(ctx.remainingWeight && ctx.remainingWeight > 0 ? Math.round(ctx.remainingWeight * 10) / 10 : 10) } : {}
+  const [v, setV] = useState<TaskValues>({ ...empty, ...suggested(), ...initial })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const toast = useToast()
@@ -43,7 +53,7 @@ export function TaskDialog({ open, onClose, ctx, taskId, initial, onSaved }: { o
   })
   useEffect(() => {
     if (open) {
-      setV({ ...empty, ...initial })
+      setV({ ...empty, ...suggested(), ...initial })
       setErrors({})
     }
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -65,6 +75,8 @@ export function TaskDialog({ open, onClose, ctx, taskId, initial, onSaved }: { o
       dueDate: v.dueDate || null,
       estimateHours: v.estimateHours === '' ? null : Number(v.estimateHours),
       weight: Number(v.weight) || 1,
+      targetQty: v.countBased && v.targetQty !== '' ? Math.round(Number(v.targetQty)) : null,
+      qtyUnit: v.countBased ? v.qtyUnit.trim() : '',
       requiresApproval: v.requiresApproval,
       dependsOn: v.dependsOn,
     }
@@ -87,7 +99,7 @@ export function TaskDialog({ open, onClose, ctx, taskId, initial, onSaved }: { o
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title={taskId ? 'Edit task' : 'New task'} width={680} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save} disabled={!v.title.trim()}>{taskId ? 'Save changes' : 'Create task'}</Button></>}>
+    <Dialog open={open} onClose={onClose} title={taskId ? 'Edit task' : 'New task'} width={680} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save} disabled={!v.title.trim() || (v.countBased && !(Number(v.targetQty) >= 1))}>{taskId ? 'Save changes' : 'Create task'}</Button></>}>
       <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); save() }}>
         <Field label="Title" required error={errors.title} className="sm:col-span-2"><Input value={v.title} onChange={(e) => set('title', e.target.value)} autoFocus /></Field>
         <Field label="Description" className="sm:col-span-2"><Textarea rows={3} value={v.description} onChange={(e) => set('description', e.target.value)} /></Field>
@@ -103,8 +115,28 @@ export function TaskDialog({ open, onClose, ctx, taskId, initial, onSaved }: { o
         ) : <div className="hidden sm:block" />}
         <Field label="Start date" error={errors.startDate}><Input type="date" value={v.startDate} onChange={(e) => set('startDate', e.target.value)} /></Field>
         <Field label="Due date" error={errors.dueDate}><Input type="date" value={v.dueDate} onChange={(e) => set('dueDate', e.target.value)} /></Field>
-        <Field label="Estimate (hours)" error={errors.estimateHours} hint="Approved effort; drives effort-weighted progress."><Input type="number" min={0} step="0.5" value={v.estimateHours} onChange={(e) => set('estimateHours', e.target.value)} /></Field>
-        <Field label="Complexity weight" error={errors.weight} hint="1 = standard. Used when no estimate exists."><Input type="number" min={0.1} step="0.5" value={v.weight} onChange={(e) => set('weight', e.target.value)} /></Field>
+        {weighted ? (
+          <Field label="Weightage (% of project)" error={errors.weight} hint={ctx.remainingWeight != null && !taskId ? `${Math.max(0, Math.round(ctx.remainingWeight * 10) / 10)}% of the project is not yet given to a task.` : 'How much of the whole project this task is worth.'}>
+            <Input type="number" min={0.1} max={100} step="1" value={v.weight} onChange={(e) => set('weight', e.target.value)} />
+          </Field>
+        ) : (
+          <Field label="Weight" error={errors.weight} hint="Only used when the project's progress method is Weightage."><Input type="number" min={0.1} max={100} step="1" value={v.weight} onChange={(e) => set('weight', e.target.value)} /></Field>
+        )}
+        <Field label="Estimate (hours)" error={errors.estimateHours} hint="For planning and effort tracking."><Input type="number" min={0} step="0.5" value={v.estimateHours} onChange={(e) => set('estimateHours', e.target.value)} /></Field>
+        <div className="sm:col-span-2 rounded-md border border-line p-3">
+          <Checkbox
+            label="Count-based task"
+            description="For work delivered in pieces, e.g. 4 videos or 10 posts. Each approved piece adds its part of this task's share to project progress."
+            checked={v.countBased}
+            onChange={(e) => set('countBased', e.target.checked)}
+          />
+          {v.countBased && (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="How many?" required error={errors.targetQty}><Input type="number" min={1} max={1000} step="1" value={v.targetQty} onChange={(e) => set('targetQty', e.target.value)} placeholder="4" /></Field>
+              <Field label="Unit" error={errors.qtyUnit}><Input value={v.qtyUnit} maxLength={30} onChange={(e) => set('qtyUnit', e.target.value)} placeholder="videos" /></Field>
+            </div>
+          )}
+        </div>
         <Field label="Additional assignees" className="sm:col-span-2">
           <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-md border border-line p-3">
             {contributors.filter((m) => m.user_id !== v.responsibleId).map((m) => (

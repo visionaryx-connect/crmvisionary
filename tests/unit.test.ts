@@ -7,7 +7,7 @@ import { hashPassword, verifyPassword } from '../worker/lib/password'
 import { totpAt, verifyTotp, base32Decode, base32Encode } from '../worker/lib/totp'
 import { detectType } from '../worker/routes/files'
 
-const t = (status: string, extra: Partial<{ estimate_hours: number | null; weight: number; milestone_id: string | null }> = {}) => ({ status, estimate_hours: null, weight: 1, milestone_id: null, ...extra })
+const t = (status: string, extra: Partial<{ estimate_hours: number | null; weight: number; milestone_id: string | null; target_qty: number | null; approved_qty: number }> = {}) => ({ status, estimate_hours: null, weight: 1, milestone_id: null, ...extra })
 
 describe('progress calculation', () => {
   it('equal mode: completed / applicable, excluding cancelled', () => {
@@ -22,9 +22,18 @@ describe('progress calculation', () => {
     const r = calculateProgress('equal', [t('cancelled')])
     expect(r).toEqual({ progress: 0, completedUnits: 0, totalUnits: 0, hasData: false })
   })
-  it('effort mode weights by estimate, falling back to weight', () => {
-    const r = calculateProgress('effort', [t('completed', { estimate_hours: 30 }), t('todo', { estimate_hours: 10 }), t('todo', { weight: 10 })])
-    expect(r.progress).toBe(60)
+  it('weightage mode uses each task\'s % share', () => {
+    // Website: layout 20% (approved), pages 30% (in review), launch 50% (todo) → 20%
+    const r = calculateProgress('effort', [t('completed', { weight: 20 }), t('in_review', { weight: 30 }), t('todo', { weight: 50 })])
+    expect(r.progress).toBe(20)
+  })
+  it('weightage shares are scaled when they do not total 100', () => {
+    expect(calculateProgress('effort', [t('completed', { weight: 30 }), t('todo', { weight: 30 })]).progress).toBe(50)
+  })
+  it('count-based tasks count approved units: 2 of 4 videos = 50%', () => {
+    expect(calculateProgress('equal', [t('in_progress', { target_qty: 4, approved_qty: 2 })]).progress).toBe(50)
+    // 4 videos task worth 40% with 2 approved, plus a 60% task done → 20 + 60
+    expect(calculateProgress('effort', [t('in_progress', { weight: 40, target_qty: 4, approved_qty: 2 }), t('completed', { weight: 60 })]).progress).toBe(80)
   })
   it('milestone mode uses milestone weights and the implicit bucket', () => {
     const ms = [{ id: 'm1', weight: 3, status: 'in_progress' }, { id: 'm2', weight: 1, status: 'achieved' }]

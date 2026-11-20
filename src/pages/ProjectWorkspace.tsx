@@ -15,14 +15,15 @@ import { useToast } from '@/components/toast'
 import { Board } from './project/Board'
 import { TaskTable } from './project/TaskTable'
 import { Timeline } from './project/Timeline'
+import { ProgressBreakdown } from './project/ProgressBreakdown'
 import { ActivityPanel, DeliverablesPanel, FeedbackPanel, FilesPanel, MilestonesPanel, TeamPanel, UpdatesPanel } from './project/Panels'
 import type { ProjectData, TaskRow } from './project/types'
 
 type Tab = 'overview' | 'board' | 'list' | 'timeline' | 'milestones' | 'deliverables' | 'files' | 'updates' | 'feedback' | 'team' | 'activity'
 
 const MODE_TEXT = {
-  equal: 'Each applicable task counts equally: completed ÷ total (cancelled tasks excluded).',
-  effort: 'Tasks are weighted by their approved estimate (or complexity weight when no estimate exists).',
+  equal: 'Every task counts the same. Only approved work counts (cancelled tasks excluded).',
+  effort: 'Each task carries a % share of the project (its weightage). A share counts once the work is approved.',
   milestone: 'Milestones contribute by weight; tasks inside each milestone count equally.',
 }
 
@@ -68,7 +69,7 @@ function EditProject({ data, open, onClose }: { data: ProjectData; open: boolean
         <Field label="Target deadline" error={errors.targetDate}><Input type="date" value={v.targetDate} onChange={(e) => setV({ ...v, targetDate: e.target.value })} /></Field>
         <Field label="Project manager"><Select value={v.managerId} onChange={(e) => setV({ ...v, managerId: e.target.value })}>{members.data?.filter((m) => m.status === 'active').map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></Field>
         <Field label="Service"><Select value={v.serviceCategoryId} onChange={(e) => setV({ ...v, serviceCategoryId: e.target.value })}><option value="">—</option>{services.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></Field>
-        <Field label="Progress method" hint={MODE_TEXT[v.progressMode]}><Select value={v.progressMode} onChange={(e) => setV({ ...v, progressMode: e.target.value as typeof v.progressMode })}><option value="equal">Equal</option><option value="effort">Effort-weighted</option><option value="milestone">Milestone-weighted</option></Select></Field>
+        <Field label="Progress method" hint={MODE_TEXT[v.progressMode]}><Select value={v.progressMode} onChange={(e) => setV({ ...v, progressMode: e.target.value as typeof v.progressMode })}><option value="effort">Weightage — each task has a % share</option><option value="equal">Equal — every task counts the same</option><option value="milestone">Milestones — weighted by milestone</option></Select></Field>
         <Field label="Estimated effort (h)"><Input type="number" min={0} value={v.estimatedHours} onChange={(e) => setV({ ...v, estimatedHours: e.target.value })} /></Field>
         <Field label="Client-facing status line" className="sm:col-span-2" hint="Shown on the client portal. Keep it approved and client-appropriate."><Input value={v.clientStatusNote} onChange={(e) => setV({ ...v, clientStatusNote: e.target.value })} /></Field>
         <Field label="Description" className="sm:col-span-2"><Textarea rows={2} value={v.description} onChange={(e) => setV({ ...v, description: e.target.value })} /></Field>
@@ -123,6 +124,8 @@ function Overview({ data, tasks }: { data: ProjectData; tasks: TaskRow[] }) {
             </div>
           </Panel>
         </section>
+
+        <ProgressBreakdown projectId={p.id} mode={p.progress_mode} tasks={tasks} progress={p.progress} canEdit={data.access.canManageTasks} />
 
         {(overdue.length > 0 || blocked.length > 0) && (
           <Section title="Needs attention">
@@ -190,7 +193,8 @@ export default function ProjectWorkspace() {
   const p = d.project
   const allTasks = (tasksQ.data ?? []).filter((t) => t.status !== 'cancelled' || tab === 'list')
   const filtered = allTasks.filter((t) => (!taskFilter.responsible || t.responsible_id === taskFilter.responsible) && (!taskFilter.milestone || t.milestone_id === taskFilter.milestone) && (taskFilter.showDone || !['completed', 'cancelled'].includes(t.status)))
-  const ctx = { projectId: p.id, members: d.members, milestones: d.milestones }
+  const usedWeight = (tasksQ.data ?? []).filter((t) => t.status !== 'cancelled').reduce((sum, t) => sum + t.weight, 0)
+  const ctx = { projectId: p.id, members: d.members, milestones: d.milestones, progressMode: p.progress_mode, remainingWeight: 100 - usedWeight }
 
   return (
     <div>

@@ -106,7 +106,7 @@ tasks.get('/', async (c) => {
   const rows = await many<Record<string, unknown>>(
     c.env.DB,
     `SELECT t.id, t.project_id, p.reference AS project_reference, p.name AS project_name, t.number, t.title, t.status, t.priority, t.due_date, t.start_date,
-            t.estimate_hours, t.weight, t.milestone_id, m.title AS milestone_title, t.responsible_id, u.name AS responsible_name, u.avatar_color AS responsible_color,
+            t.estimate_hours, t.weight, t.target_qty, t.approved_qty, t.qty_unit, t.milestone_id, m.title AS milestone_title, t.responsible_id, u.name AS responsible_name, u.avatar_color AS responsible_color,
             t.blocked_reason, t.requires_approval, t.sort_order, t.updated_at, t.completed_at, t.submitted_at,
             (SELECT COUNT(*) FROM subtasks s WHERE s.task_id = t.id) AS subtask_total,
             (SELECT COUNT(*) FROM subtasks s WHERE s.task_id = t.id AND s.done = 1) AS subtask_done,
@@ -236,7 +236,7 @@ tasks.post('/ai-preview', async (c) => {
       responsibleId: employee?.id ?? null, responsibleName: (employee?.name ?? responsibleName) || null,
       title, description: text(parsed.description).slice(0, 10000), status: 'todo', priority,
       dueDate: validDate ? date : null, startDate: null, milestoneId: null,
-      assigneeIds: [], estimateHours: null, weight: 1, requiresApproval: true, dependsOn: [],
+      assigneeIds: [], estimateHours: null, weight: 1, targetQty: null, qtyUnit: '', requiresApproval: true, dependsOn: [],
     },
     warnings, readyToCreate: warnings.length === 0 && !!project && !!title, requiresConfirmation: true,
   })
@@ -258,9 +258,9 @@ tasks.post('/', async (c) => {
   const now = nowIso()
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO tasks (id, project_id, milestone_id, number, title, description, status, priority, responsible_id, start_date, due_date, estimate_hours, weight, requires_approval, sort_order, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, input.projectId, input.milestoneId ?? null, num!.n, input.title, input.description, input.status, input.priority, input.responsibleId ?? null, input.startDate ?? null, input.dueDate ?? null, input.estimateHours ?? null, input.weight, input.requiresApproval ? 1 : 0, Date.now(), a.userId, now, now),
+      `INSERT INTO tasks (id, project_id, milestone_id, number, title, description, status, priority, responsible_id, start_date, due_date, estimate_hours, weight, target_qty, qty_unit, requires_approval, sort_order, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, input.projectId, input.milestoneId ?? null, num!.n, input.title, input.description, input.status, input.priority, input.responsibleId ?? null, input.startDate ?? null, input.dueDate ?? null, input.estimateHours ?? null, input.weight, input.targetQty ?? null, input.qtyUnit, input.requiresApproval ? 1 : 0, Date.now(), a.userId, now, now),
     ...assignees.map((u) => c.env.DB.prepare('INSERT INTO task_assignees (task_id, user_id, added_at) VALUES (?, ?, ?)').bind(id, u, now)),
     ...input.dependsOn.map((d) => c.env.DB.prepare('INSERT INTO task_dependencies (task_id, depends_on_task_id, created_at) VALUES (?, ?, ?)').bind(id, d, now)),
     c.env.DB.prepare('INSERT INTO task_status_history (id, task_id, project_id, from_status, to_status, note, changed_by, changed_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)').bind(newId('tsh'), id, input.projectId, input.status, 'Task created', a.userId, now),
@@ -302,9 +302,24 @@ tasks.get('/:id', async (c) => {
     many(c.env.DB, 'SELECT s.*, u.name AS submitted_by_name, d.name AS decided_by_name FROM task_submissions s JOIN users u ON u.id = s.submitted_by LEFT JOIN users d ON d.id = s.decided_by WHERE s.task_id = ? ORDER BY s.submitted_at DESC', id),
     many(c.env.DB, 'SELECT h.from_status, h.to_status, h.note, h.changed_at, u.name AS changed_by_name FROM task_status_history h LEFT JOIN users u ON u.id = h.changed_by WHERE h.task_id = ? ORDER BY h.changed_at DESC', id),
   ])
+  // Share of the project this task carries, under the project's progress method.
+  const shareRow = await one<{ mode: string; total_weight: number; applicable: number }>(
+    c.env.DB,
+    `SELECT p.progress_mode AS mode, COALESCE(SUM(CASE WHEN t.status <> 'cancelled' THEN t.weight END), 0) AS total_weight,
+            SUM(CASE WHEN t.status <> 'cancelled' THEN 1 ELSE 0 END) AS applicable
+       FROM projects p LEFT JOIN tasks t ON t.project_id = p.id WHERE p.id = (SELECT project_id FROM tasks WHERE id = ?) GROUP BY p.id`,
+    id,
+  )
+  const cancelled = row?.status === 'cancelled'
+  const projectShare = !shareRow || cancelled ? null
+    : shareRow.mode === 'effort' ? (shareRow.total_weight > 0 ? Math.round((Number(row?.weight) / shareRow.total_weight) * 1000) / 10 : null)
+    : shareRow.mode === 'equal' ? (shareRow.applicable > 0 ? Math.round((1 / shareRow.applicable) * 1000) / 10 : null)
+    : null
   const changeLog = await many(c.env.DB, `SELECT l.summary, l.changes, l.created_at, u.name AS actor_name FROM activity_logs l LEFT JOIN users u ON u.id = l.actor_id WHERE l.entity_type = 'task' AND l.entity_id = ? ORDER BY l.created_at DESC LIMIT 50`, id)
   return c.json({
     task: { ...row, requires_approval: Boolean(row?.requires_approval) },
+    progressMode: shareRow?.mode ?? 'equal',
+    projectShare,
     assignees,
     subtasks: subtasks.map((s) => ({ ...(s as object), done: Boolean((s as { done: number }).done) })),
     dependsOn,
@@ -347,7 +362,13 @@ tasks.patch('/:id', async (c) => {
   const { sets, values } = patchColumns(input as Record<string, unknown>, {
     title: 'title', description: 'description', milestoneId: 'milestone_id', priority: 'priority', responsibleId: 'responsible_id', startDate: 'start_date',
     dueDate: 'due_date', estimateHours: 'estimate_hours', weight: 'weight', requiresApproval: 'requires_approval',
+    targetQty: 'target_qty', qtyUnit: 'qty_unit', approvedQty: 'approved_qty',
   })
+  const target = input.targetQty !== undefined ? input.targetQty : (before.target_qty as number | null)
+  const approvedQty = input.approvedQty !== undefined ? input.approvedQty : Number(before.approved_qty ?? 0)
+  if (target != null && approvedQty > target) {
+    throw new ApiError(422, 'VALIDATION_FAILED', `Approved count can't exceed the target of ${target}`, { fields: { approvedQty: `At most ${target}`, targetQty: `At least ${approvedQty} are already approved` } })
+  }
   const now = nowIso()
   const stmts: D1PreparedStatement[] = []
   if (sets.length) stmts.push(c.env.DB.prepare(`UPDATE tasks SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).bind(...values, now, task.id))
@@ -368,7 +389,7 @@ tasks.patch('/:id', async (c) => {
   stmts.push(activity(c.env.DB, { actorId: a.userId, action: 'task.updated', entityType: 'task', entityId: task.id, projectId: task.project_id, summary: `Updated task #${task.number}${parts.length ? ' · ' + parts.join(', ') : ''}`, changes, ip: clientIp(c) }))
   await c.env.DB.batch(stmts)
   const autoMoved = changes.responsible_id && newResponsible ? await onTaskAssigned(c.env, c.executionCtx, task.id) : false
-  if (autoMoved || changes.weight || changes.estimate_hours || changes.milestone_id) await recalcProgress(c.env, c.executionCtx, task.project_id)
+  if (autoMoved || changes.weight || changes.estimate_hours || changes.milestone_id || changes.target_qty || changes.approved_qty) await recalcProgress(c.env, c.executionCtx, task.project_id)
 
   const newlyAssigned = [
     ...(changes.responsible_id && newResponsible ? [newResponsible] : []),
@@ -421,6 +442,7 @@ async function transition(db: D1Database, t: TransitionCtx, to: TaskStatus, note
                 ELSE start_date
               END,
               completed_at = CASE WHEN ? = 'completed' THEN ? ELSE NULL END,
+              approved_qty = CASE WHEN ? = 'completed' AND target_qty IS NOT NULL THEN target_qty ELSE approved_qty END,
               approved_by = CASE WHEN ? = 'completed' THEN approved_by ELSE NULL END,
               cancelled_at = CASE WHEN ? = 'cancelled' THEN ? ELSE NULL END
         WHERE id = ?`,
@@ -432,6 +454,7 @@ async function transition(db: D1Database, t: TransitionCtx, to: TaskStatus, note
       today,
       to,
       now,
+      to,
       to,
       to,
       now,
@@ -482,14 +505,23 @@ tasks.post('/:id/submit', async (c) => {
   if (!task.requires_approval) throw conflict('This task does not require review — mark it complete instead')
   const deps = await openDependencies(c.env.DB, task.id)
   if (deps.length) throw new ApiError(409, 'DEPENDENCIES_OPEN', `Waiting on ${deps.map((d) => `#${d.number}`).join(', ')}`, { dependencies: deps })
-  const { note } = await body(c, taskSubmitSchema)
+  const { note, qty: askedQty } = await body(c, taskSubmitSchema)
+  const counts = await one<{ target_qty: number | null; approved_qty: number; qty_unit: string }>(c.env.DB, 'SELECT target_qty, approved_qty, qty_unit FROM tasks WHERE id = ?', task.id)
+  let qty: number | null = null
+  if (counts?.target_qty) {
+    const remaining = counts.target_qty - counts.approved_qty
+    if (remaining <= 0) throw conflict('All units of this task are already approved')
+    qty = askedQty ?? remaining
+    if (qty > remaining) throw new ApiError(422, 'VALIDATION_FAILED', `Only ${remaining} ${counts.qty_unit || 'units'} remain`, { fields: { qty: `At most ${remaining}` } })
+  }
+  const countLabel = qty ? ` · ${qty} ${counts!.qty_unit || 'units'}` : ''
   const now = nowIso()
   const sid = newId('sub')
   await c.env.DB.batch([
     c.env.DB.prepare(`UPDATE tasks SET status = 'in_review', submitted_at = ?, blocked_reason = NULL, updated_at = ? WHERE id = ?`).bind(now, now, task.id),
-    c.env.DB.prepare('INSERT INTO task_submissions (id, task_id, submitted_by, note, submitted_at) VALUES (?, ?, ?, ?, ?)').bind(sid, task.id, a.userId, note, now),
-    c.env.DB.prepare('INSERT INTO task_status_history (id, task_id, project_id, from_status, to_status, note, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(newId('tsh'), task.id, task.project_id, task.status, 'in_review', note || 'Submitted for review', a.userId, now),
-    activity(c.env.DB, { actorId: a.userId, action: 'task.submitted', entityType: 'task', entityId: task.id, projectId: task.project_id, summary: `Submitted #${task.number} ${task.title} for review` }),
+    c.env.DB.prepare('INSERT INTO task_submissions (id, task_id, submitted_by, note, qty, submitted_at) VALUES (?, ?, ?, ?, ?, ?)').bind(sid, task.id, a.userId, note, qty, now),
+    c.env.DB.prepare('INSERT INTO task_status_history (id, task_id, project_id, from_status, to_status, note, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(newId('tsh'), task.id, task.project_id, task.status, 'in_review', (note || 'Submitted for review') + countLabel, a.userId, now),
+    activity(c.env.DB, { actorId: a.userId, action: 'task.submitted', entityType: 'task', entityId: task.id, projectId: task.project_id, summary: `Submitted #${task.number} ${task.title} for review${countLabel}` }),
   ])
   const reviewers = await projectReviewers(c.env.DB, task.project_id)
   await notify(c.env, c.executionCtx, reviewers.map((u) => ({ userId: u, kind: 'review_requested' as const, title: `Review requested: #${task.number} ${task.title}`, body: `${a.name} · ${access.project.reference}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id })), a.userId)
@@ -502,20 +534,34 @@ tasks.post('/:id/review', async (c) => {
   const { task, access } = await taskAccess(c.env.DB, a, c.req.param('id'))
   if (!access.canReview) throw forbidden('You do not have review authority on this project')
   if (task.status !== 'in_review') throw conflict('This task is not awaiting review')
-  const sub = await one<{ id: string; submitted_by: string }>(c.env.DB, `SELECT id, submitted_by FROM task_submissions WHERE task_id = ? AND decision = 'pending' ORDER BY submitted_at DESC LIMIT 1`, task.id)
+  const sub = await one<{ id: string; submitted_by: string; qty: number | null }>(c.env.DB, `SELECT id, submitted_by, qty FROM task_submissions WHERE task_id = ? AND decision = 'pending' ORDER BY submitted_at DESC LIMIT 1`, task.id)
   if (!sub) throw conflict('No pending submission found')
   if (sub.submitted_by === a.userId && !access.canManage) throw forbidden('You cannot approve your own submission. Ask another reviewer.')
   const input = await body(c, taskReviewSchema)
   const approved = input.decision === 'approved'
+  // Count-based tasks: an approval adds the accepted units; the task completes only when all units are approved.
+  const counts = await one<{ target_qty: number | null; approved_qty: number; qty_unit: string }>(c.env.DB, 'SELECT target_qty, approved_qty, qty_unit FROM tasks WHERE id = ?', task.id)
+  let newApproved: number | null = null
+  let partial = false
+  if (approved && counts?.target_qty) {
+    const remaining = Math.max(0, counts.target_qty - counts.approved_qty)
+    const accepted = input.qty ?? sub.qty ?? remaining
+    if (accepted > remaining) throw new ApiError(422, 'VALIDATION_FAILED', `Only ${remaining} ${counts.qty_unit || 'units'} remain`, { fields: { qty: `At most ${remaining}` } })
+    newApproved = counts.approved_qty + accepted
+    partial = newApproved < counts.target_qty
+  }
+  const unit = counts?.qty_unit || 'units'
+  const approvalNote = newApproved != null ? `Approved ${newApproved} of ${counts!.target_qty} ${unit}` : 'Approved'
+  const toStatus = !approved || partial ? 'in_progress' : 'completed'
   const now = nowIso()
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE task_submissions SET decision = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ?').bind(input.decision, a.userId, now, input.note, sub.id),
-    approved
-      ? c.env.DB.prepare(`UPDATE tasks SET status = 'completed', completed_at = ?, approved_by = ?, updated_at = ? WHERE id = ?`).bind(now, a.userId, now, task.id)
-      : c.env.DB.prepare(`UPDATE tasks SET status = 'in_progress', updated_at = ? WHERE id = ?`).bind(now, task.id),
+    c.env.DB.prepare('UPDATE task_submissions SET decision = ?, decided_by = ?, decided_at = ?, decision_note = ?, qty = COALESCE(?, qty) WHERE id = ?').bind(input.decision, a.userId, now, input.note, approved && newApproved != null ? newApproved - counts!.approved_qty : null, sub.id),
+    toStatus === 'completed'
+      ? c.env.DB.prepare(`UPDATE tasks SET status = 'completed', completed_at = ?, approved_by = ?, approved_qty = COALESCE(target_qty, approved_qty), updated_at = ? WHERE id = ?`).bind(now, a.userId, now, task.id)
+      : c.env.DB.prepare(`UPDATE tasks SET status = 'in_progress', approved_qty = COALESCE(?, approved_qty), updated_at = ? WHERE id = ?`).bind(newApproved, now, task.id),
     c.env.DB.prepare('INSERT INTO task_status_history (id, task_id, project_id, from_status, to_status, note, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(newId('tsh'), task.id, task.project_id, 'in_review', approved ? 'completed' : 'in_progress', input.note || (approved ? 'Approved' : 'Revisions requested'), a.userId, now),
-    activity(c.env.DB, { actorId: a.userId, action: approved ? 'task.approved' : 'task.revision_requested', entityType: 'task', entityId: task.id, projectId: task.project_id, summary: `${approved ? 'Approved' : 'Requested revisions on'} #${task.number} ${task.title}` }),
+      .bind(newId('tsh'), task.id, task.project_id, 'in_review', toStatus, [approved ? approvalNote : 'Revisions requested', input.note].filter(Boolean).join(' · '), a.userId, now),
+    activity(c.env.DB, { actorId: a.userId, action: approved ? 'task.approved' : 'task.revision_requested', entityType: 'task', entityId: task.id, projectId: task.project_id, summary: `${approved ? approvalNote : 'Requested revisions on'} · #${task.number} ${task.title}` }),
   ])
   await recalcProgress(c.env, c.executionCtx, task.project_id)
   const recipients = [...new Set([sub.submitted_by, task.responsible_id].filter(Boolean) as string[])]
@@ -525,7 +571,7 @@ tasks.post('/:id/review', async (c) => {
     recipients.map((u) => ({
       userId: u,
       kind: approved ? ('task_approved' as const) : ('revision_requested' as const),
-      title: approved ? `Approved: #${task.number} ${task.title}` : `Revisions requested: #${task.number} ${task.title}`,
+      title: approved ? `${partial ? approvalNote : 'Approved'}: #${task.number} ${task.title}` : `Revisions requested: #${task.number} ${task.title}`,
       body: input.note,
       link: `/tasks/${task.id}`,
       entityType: 'task',

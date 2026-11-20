@@ -84,6 +84,8 @@ export interface TaskWorkflowInput {
   openDependencies: number
   blockedReason: string | null
   hasPendingSubmission: boolean
+  /** Count-based tasks: units approved so far out of the target. */
+  qty?: { approved: number; target: number; unit: string } | null
 }
 
 /** Plain-language guidance for a task, tailored to the viewer's role. */
@@ -98,6 +100,12 @@ export function taskGuidance(t: TaskWorkflowInput): { current: number; warning: 
   if (t.status === 'in_review') {
     if (t.canReview && t.hasPendingSubmission) return { current, warning: null, title: 'Your review is needed', body: 'Check the submission, then Approve it or Request revisions with a note explaining what to change.' }
     return { current, warning: null, title: 'Waiting for a reviewer', body: 'The project manager or a reviewer will approve it or send it back with notes. You will be notified either way.' }
+  }
+  if (t.status === 'in_progress' && t.qty && t.qty.approved > 0) {
+    const left = t.qty.target - t.qty.approved
+    return t.isAssignee
+      ? { current, warning: null, title: `${t.qty.approved} of ${t.qty.target} ${t.qty.unit} approved — ${left} to go`, body: 'Deliver the next part, then Submit next part. Each approved part adds to project progress straight away.' }
+      : { current, warning: null, title: `${t.qty.approved} of ${t.qty.target} ${t.qty.unit} approved`, body: `${left} still to be delivered. Approved parts already count in project progress.` }
   }
   if (t.status === 'in_progress') {
     if (t.isAssignee) return t.requiresApproval

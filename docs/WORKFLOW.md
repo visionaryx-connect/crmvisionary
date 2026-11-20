@@ -25,8 +25,8 @@ A plain-language guide to how clients, projects and tasks move through the syste
 ## 2. Setting up a project (project manager)
 
 1. **Projects → New project.** Pick the client, the target deadline and how progress is counted:
-   - *Equal*: every task counts the same (best for most projects).
-   - *Effort*: bigger tasks (by estimated hours) count more.
+   - *Weightage* (default): each task carries a % share of the project, set by the PM.
+   - *Equal*: every task counts the same.
    - *Milestone*: each milestone has a weight.
 2. **Team tab → Add people.** Choose each person's role:
    - *Lead*: can create and manage tasks.
@@ -39,10 +39,32 @@ A plain-language guide to how clients, projects and tasks move through the syste
    - an **owner** (responsible person);
    - a **due date**;
    - an **estimate**;
+   - its **weightage** — the % of the whole project it is worth;
+   - **Count-based task** with *How many* + *Unit* if it is delivered in parts (e.g. 4 videos);
    - the **milestone** it belongs to;
    - and, if needed, **depends on** (the tasks that must finish first).
 
 Leave *Requires review* on unless the task is trivial.
+
+### How progress is calculated
+
+Progress is never typed in. It is the sum of each task's share × how much of it is **approved**.
+
+**Example 1 — website.** Client *Biotonic*, project *Biotonic web*:
+
+| Task | Weightage | Status | Adds to project |
+|---|---|---|---|
+| Website layout | 20% | Approved | 20% |
+| Inner pages | 30% | In review | 0% (not approved yet) |
+| Changes & fixes | 20% | In progress | 0% |
+| Launch | 30% | To do | 0% |
+| **Project** | 100% | | **20%** |
+
+When *Inner pages* is approved, the project jumps to **50%**.
+
+**Example 2 — content.** The client needs 4 videos (task worth 40%). The editor finishes 2, clicks **Submit for review** and enters *2 videos*. Once approved, the task shows **2 / 4 videos (50%)** and adds **20%** (40% × 50%) to the project. It stays *In progress*; the editor uses **Submit next part** for the rest, and the task moves to *Done* when all 4 are approved. A reviewer can approve fewer than were submitted (e.g. 1 of 2) if one needs rework.
+
+The project **Overview → How progress is calculated** panel lists every task's share, how much is done and what it adds. The PM can edit each share there; if the shares don't total 100% they are scaled automatically, and **Make it 100%** fixes them in one click.
 
 > Tip: tasks you're not ready to schedule can go in **Backlog**. As soon as you give one an owner, it moves to **To do** automatically.
 
@@ -63,7 +85,7 @@ Leave *Requires review* on unless the task is trivial.
 | Working | **In progress** | Owner | Tick the checklist and **Log time**. When finished, **Submit for review** with a short note. |
 | Stuck | **Blocked** | Owner | **Blocked** + say why (reviewers are notified). **Unblock** when resolved. |
 | Waiting | **In review** | Reviewer | **Approve**, or **Request revisions** and explain what to change. |
-| Done | **Completed** | — | Counts towards project progress. |
+| Done | **Completed** | — | Counts towards project progress (its full weightage). Count-based tasks also count each approved part before this. |
 
 **Rules that keep things honest:**
 - A reviewed task counts as done only once it is **approved**; submitting it isn't enough.

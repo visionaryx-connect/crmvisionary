@@ -7,12 +7,15 @@
  *     reach `completed` through a reviewer's approval, so unapproved submissions never move progress.
  *  3. Modes:
  *     - equal:     every applicable task has weight 1.  progress = completed / applicable × 100
- *     - effort:    each task is weighted by its approved estimate (estimate_hours > 0), falling back to its
- *                  explicit `weight` (default 1) when no estimate is recorded.
+ *     - effort:    shown to users as "Weightage". Each task carries a percentage share of the project in
+ *                  `weight` (e.g. layout 20, pages 30, …). progress = Σ(share × task completion) / Σ share,
+ *                  so shares are scaled if they do not total exactly 100.
  *     - milestone: each milestone contributes its `weight`. Inside a milestone, tasks are equally weighted.
  *                  A milestone with no applicable tasks counts as 100% only when it is marked achieved.
  *                  Tasks with no milestone form an implicit bucket of weight 1.
- *  4. When nothing is applicable, progress is 0 and `hasData` is false so the UI can say "no tasks yet"
+ *  4. Count-based tasks (target_qty, e.g. "4 videos") complete partially: approved_qty / target_qty of the task
+ *     counts until it is completed. 2 of 4 videos approved = half of that task's share.
+ *  5. When nothing is applicable, progress is 0 and `hasData` is false so the UI can say "no tasks yet"
  *     instead of implying 0% delivery.
  */
 
@@ -23,6 +26,9 @@ export interface ProgressTask {
   estimate_hours: number | null
   weight: number
   milestone_id: string | null
+  /** Count-based tasks: units required and units approved so far. */
+  target_qty?: number | null
+  approved_qty?: number | null
 }
 
 export interface ProgressMilestone {
@@ -40,12 +46,17 @@ export interface ProgressResult {
 
 const round1 = (n: number) => Math.round(n * 10) / 10
 
-function taskUnit(task: ProgressTask, mode: ProgressMode): number {
-  if (mode === 'effort') {
-    if (task.estimate_hours != null && task.estimate_hours > 0) return task.estimate_hours
-    return task.weight > 0 ? task.weight : 1
-  }
+export function taskUnit(task: ProgressTask, mode: ProgressMode): number {
+  if (mode === 'effort') return task.weight > 0 ? task.weight : 1
   return 1
+}
+
+/** How much of one task is done, 0..1. Only approved work counts. */
+export function taskFraction(task: ProgressTask): number {
+  if (task.status === 'cancelled') return 0
+  if (task.status === 'completed') return 1
+  if (task.target_qty && task.target_qty > 0) return Math.min(1, Math.max(0, (task.approved_qty ?? 0) / task.target_qty))
+  return 0
 }
 
 export function calculateProgress(
@@ -61,7 +72,7 @@ export function calculateProgress(
     for (const t of applicable) {
       const u = taskUnit(t, mode)
       total += u
-      if (t.status === 'completed') done += u
+      done += u * taskFraction(t)
     }
     if (total === 0) return { progress: 0, completedUnits: 0, totalUnits: 0, hasData: false }
     return { progress: round1((done / total) * 100), completedUnits: round1(done), totalUnits: round1(total), hasData: true }
@@ -82,14 +93,14 @@ export function calculateProgress(
     const list = byMilestone.get(m.id) ?? []
     let fraction: number
     if (list.length === 0) fraction = m.status === 'achieved' ? 1 : 0
-    else fraction = list.filter((t) => t.status === 'completed').length / list.length
+    else fraction = list.reduce((sum, t) => sum + taskFraction(t), 0) / list.length
     totalWeight += w
     doneWeight += w * fraction
   }
   const loose = byMilestone.get(null) ?? []
   if (loose.length > 0) {
     totalWeight += 1
-    doneWeight += loose.filter((t) => t.status === 'completed').length / loose.length
+    doneWeight += loose.reduce((sum, t) => sum + taskFraction(t), 0) / loose.length
   }
   if (totalWeight === 0) return { progress: 0, completedUnits: 0, totalUnits: 0, hasData: false }
   return {

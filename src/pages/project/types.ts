@@ -17,7 +17,7 @@ export interface ProjectData {
 
 export interface TaskRow {
   id: string; project_id: string; project_reference: string; project_name: string; number: number; title: string; status: string; priority: string
-  due_date: string | null; start_date: string | null; estimate_hours: number | null; weight: number; milestone_id: string | null; milestone_title: string | null
+  due_date: string | null; start_date: string | null; estimate_hours: number | null; weight: number; target_qty: number | null; approved_qty: number | null; qty_unit: string | null; milestone_id: string | null; milestone_title: string | null
   responsible_id: string | null; responsible_name: string | null; responsible_color: string | null; blocked_reason: string | null; requires_approval: boolean
   sort_order: number; subtask_total: number; subtask_done: number; comment_count: number; open_dependencies: number; logged_minutes: number; overdue: boolean; completed_at: string | null
 }
