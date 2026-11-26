@@ -11,6 +11,8 @@ import { many, nowIso, one } from '../lib/db'
 import { ApiError, body, clientIp, conflict, forbidden, notFound, query } from '../lib/http'
 import { can, requirePermission, requireStaff } from '../lib/session'
 import { notify, usersWithPermission } from '../services/notify'
+import { leaveCancelled, leaveDecided, leaveRequested } from '../services/moduleNotifications'
+import { hrUsers } from '../services/notificationRouting'
 import { publish, rooms } from '../services/realtime'
 import { getDayOffSource, getSetting, getWorkweek } from '../services/settings'
 
@@ -134,7 +136,7 @@ hr.post('/leave', requirePermission('leave.request'), async (c) => {
   ])
   const manager = await one<{ manager_user_id: string | null }>(c.env.DB, 'SELECT manager_user_id FROM employee_profiles WHERE user_id = ?', a.userId)
   const approvers = new Set([...(await usersWithPermission(c.env.DB, 'leave.approve')), ...(manager?.manager_user_id ? [manager.manager_user_id] : [])])
-  await notify(c.env, c.executionCtx, [...approvers].map((u) => ({ userId: u, kind: 'leave_requested' as const, title: `${a.name} requested leave`, body: `${type.name}: ${input.startDate} – ${input.endDate} (${days} day${days === 1 ? '' : 's'})`, link: '/hr/leave?tab=approvals', entityType: 'leave_request', entityId: id })), a.userId)
+  await leaveRequested(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, [...approvers], `${type.name}: ${input.startDate} – ${input.endDate} (${days} day${days === 1 ? '' : 's'})${input.reason ? ` · ${input.reason}` : ''}`)
   publish(c.env, c.executionCtx, [{ type: 'leave.requested', room: rooms.perm('leave.approve'), data: { leaveId: id } }])
   return c.json({ id, days }, 201)
 })
@@ -157,7 +159,7 @@ hr.post('/leave/:id/decide', async (c) => {
     c.env.DB.prepare('UPDATE leave_requests SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, updated_at = ? WHERE id = ?').bind(input.decision, a.userId, now, input.note, now, id),
     activity(c.env.DB, { actorId: a.userId, action: `leave.${input.decision}`, entityType: 'leave_request', entityId: id, summary: `${input.decision === 'approved' ? 'Approved' : 'Rejected'} ${l.type_name} ${l.start_date} – ${l.end_date}` }),
   ])
-  await notify(c.env, c.executionCtx, [{ userId: l.user_id, kind: 'leave_decision', title: `Leave ${input.decision}: ${l.start_date} – ${l.end_date}`, body: input.note, link: '/hr/leave' }], a.userId)
+  await leaveDecided(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, l.user_id, input.decision, `${l.start_date} – ${l.end_date}`, l.type_name, input.note)
   publish(c.env, c.executionCtx, [
     { type: 'leave.approved', room: rooms.user(l.user_id), data: { leaveId: id, decision: input.decision } },
     ...(input.decision === 'approved' ? [{ type: 'calendar.event_updated' as const, room: rooms.company(), data: { leaveId: id } }] : []),
@@ -177,6 +179,8 @@ hr.post('/leave/:id/cancel', async (c) => {
     c.env.DB.prepare(`UPDATE leave_requests SET status = 'cancelled', updated_at = ? WHERE id = ?`).bind(nowIso(), id),
     activity(c.env.DB, { actorId: a.userId, action: 'leave.cancelled', entityType: 'leave_request', entityId: id, summary: 'Cancelled a leave request' }),
   ])
+  const lr = await one<{ end_date: string }>(c.env.DB, 'SELECT end_date FROM leave_requests WHERE id = ?', id)
+  await leaveCancelled(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, l.user_id, `${l.start_date} – ${lr?.end_date ?? l.start_date}`, l.status === 'approved')
   publish(c.env, c.executionCtx, [{ type: 'calendar.event_updated', room: rooms.company(), data: { leaveId: id } }])
   return c.json({ ok: true })
 })
@@ -203,7 +207,15 @@ hr.post('/attendance/check-in', requirePermission('attendance.self'), async (c) 
     `INSERT INTO attendance_records (id, user_id, work_date, check_in_at, status, source, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, 'self', ?, ?, ?)
      ON CONFLICT(user_id, work_date) DO UPDATE SET check_in_at = excluded.check_in_at, status = excluded.status, updated_at = excluded.updated_at`,
   ).bind(newId('att'), a.userId, today, now, remote ? 'remote' : 'present', now, now, a.userId).run()
-  return c.json({ ok: true, at: now })
+  const { attendance: att } = await getSetting(c.env.DB, 'notifications.schedule')
+  const local = new Date(now).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  const halfLeave = await one<{ half_day: string }>(c.env.DB, `SELECT half_day FROM leave_requests WHERE user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ?`, a.userId, today, today)
+  const late = att.enabled && local > att.lateAfter && halfLeave?.half_day !== 'first_half'
+  await notify(c.env, c.executionCtx, [
+    { userId: a.userId, event: 'ATTENDANCE_PRESENT', title: `Checked in at ${local}${remote ? ' (remote)' : ''}`, body: late ? `After ${att.lateAfter}, so this counts as a late arrival.` : 'Have a good day.', link: '/hr/attendance', dedupeKey: `att-present:${today}` },
+    ...(late ? (await hrUsers(c.env.DB)).filter((u) => u !== a.userId).map((u) => ({ userId: u, event: 'ATTENDANCE_LATE' as const, title: `Late arrival: ${a.name} checked in at ${local}`, link: `/hr/attendance?month=${today.slice(0, 7)}`, dedupeKey: `att-late-in:${a.userId}:${today}` })) : []),
+  ])
+  return c.json({ ok: true, at: now, late })
 })
 
 hr.post('/attendance/check-out', requirePermission('attendance.self'), async (c) => {
@@ -218,6 +230,15 @@ hr.post('/attendance/check-out', requirePermission('attendance.self'), async (c)
   await c.env.DB.prepare(`UPDATE attendance_records SET check_out_at = ?, status = CASE WHEN status = 'remote' THEN 'remote' WHEN ? < ? THEN 'half_day' ELSE 'present' END, updated_at = ? WHERE id = ?`)
     .bind(now, hours, halfDayHours, now, rec.id)
     .run()
+  const { attendance: att } = await getSetting(c.env.DB, 'notifications.schedule')
+  const local = new Date(now).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  const halfLeave = await one<{ half_day: string }>(c.env.DB, `SELECT half_day FROM leave_requests WHERE user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ?`, a.userId, today, today)
+  if (att.enabled && local < att.earlyBefore && halfLeave?.half_day !== 'second_half') {
+    await notify(c.env, c.executionCtx, [
+      { userId: a.userId, event: 'ATTENDANCE_EARLY_DEPARTURE', title: `Checked out at ${local}, before ${att.earlyBefore}`, body: 'If you are working elsewhere, request an attendance correction.', link: '/hr/attendance', dedupeKey: `att-early:${today}` },
+      ...(await hrUsers(c.env.DB)).filter((u) => u !== a.userId).map((u) => ({ userId: u, event: 'ATTENDANCE_EARLY_DEPARTURE' as const, title: `Early departure: ${a.name} checked out at ${local}`, link: `/hr/attendance?month=${today.slice(0, 7)}`, dedupeKey: `att-early:${a.userId}:${today}` })),
+    ])
+  }
   return c.json({ ok: true, at: now, hours: Math.round(hours * 100) / 100 })
 })
 
@@ -287,7 +308,7 @@ hr.post('/attendance/corrections', requirePermission('attendance.self'), async (
     .bind(id, a.userId, input.workDate, input.requestedCheckIn ?? null, input.requestedCheckOut ?? null, input.requestedStatus, input.reason, nowIso())
     .run()
   const approvers = await usersWithPermission(c.env.DB, 'attendance.manage')
-  await notify(c.env, c.executionCtx, approvers.map((u) => ({ userId: u, kind: 'leave_requested' as const, title: `Attendance correction from ${a.name}`, body: `${input.workDate}: ${input.reason}`, link: '/hr/attendance?tab=corrections' })), a.userId)
+  await notify(c.env, c.executionCtx, approvers.map((u) => ({ userId: u, event: 'ATTENDANCE_CORRECTION_REQUESTED' as const, title: `Attendance correction from ${a.name}`, body: `${input.workDate}: ${input.reason}`, link: '/hr/attendance?tab=corrections', entityType: 'attendance_correction', entityId: id, email: { intro: `${a.name} asked for an attendance correction.`, details: [['Date', input.workDate], ['Requested status', input.requestedStatus], ['Check-in', input.requestedCheckIn ?? '—'], ['Check-out', input.requestedCheckOut ?? '—']], message: input.reason, actionLabel: 'Review correction' } })), a.userId, { actorName: a.name })
   return c.json({ id }, 201)
 })
 
@@ -326,7 +347,7 @@ hr.post('/attendance/corrections/:id/decide', requirePermission('attendance.mana
     )
   }
   await c.env.DB.batch(stmts)
-  await notify(c.env, c.executionCtx, [{ userId: cr.user_id, kind: 'leave_decision', title: `Attendance correction ${input.decision} (${cr.work_date})`, body: input.note, link: '/hr/attendance' }], a.userId)
+  await notify(c.env, c.executionCtx, [{ userId: cr.user_id, event: input.decision === 'approved' ? 'ATTENDANCE_CORRECTION_APPROVED' : 'ATTENDANCE_CORRECTION_REJECTED', title: `Attendance correction ${input.decision} (${cr.work_date})`, body: input.note, link: '/hr/attendance', entityType: 'attendance_correction', entityId: id, email: { intro: `${a.name} ${input.decision} your attendance correction.`, details: [['Date', cr.work_date], ['Requested status', cr.requested_status]], message: input.note } }], a.userId, { actorName: a.name })
   return c.json({ ok: true })
 })
 
@@ -344,6 +365,7 @@ hr.put('/attendance', requirePermission('attendance.manage'), async (c) => {
     ).bind(newId('att'), input.userId, input.workDate, input.checkIn ? localDateTimeToUtc(input.workDate, input.checkIn) : null, input.checkOut ? localDateTimeToUtc(input.workDate, input.checkOut) : null, input.status, input.note, now, now, a.userId),
     activity(c.env.DB, { category: 'admin', actorId: a.userId, action: 'attendance.manual_edit', entityType: 'user', entityId: input.userId, summary: `Edited attendance for ${input.workDate}: ${input.note}`, changes: { before, after: input }, ip: clientIp(c) }),
   ])
+  await notify(c.env, c.executionCtx, [{ userId: input.userId, event: 'ATTENDANCE_MODIFIED', title: `HR updated your attendance for ${input.workDate}`, body: `Status: ${input.status}${input.note ? ` · ${input.note}` : ''}`, link: `/hr/attendance?month=${input.workDate.slice(0, 7)}`, email: { intro: `${a.name} edited your attendance record.`, details: [['Date', input.workDate], ['Status', input.status], ['Check-in', input.checkIn ?? '—'], ['Check-out', input.checkOut ?? '—']], message: input.note } }], a.userId, { actorName: a.name })
   return c.json({ ok: true })
 })
 

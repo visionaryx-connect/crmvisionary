@@ -41,7 +41,17 @@ export const PERMISSIONS = {
   'audit.read': { label: 'Read audit and security logs', category: 'Administration' },
   'security.manage': { label: 'Revoke sessions and manage security', category: 'Administration' },
   'data.export': { label: 'Export company data', category: 'Administration' },
+
+  'notifications.read_all': { label: 'View every notification and delivery log', category: 'Notifications' },
+  'notifications.manage': { label: 'Configure notification rules, templates and schedules', category: 'Notifications' },
+  'notifications.broadcast': { label: 'Send announcements and messages', category: 'Notifications' },
 } as const
+
+/**
+ * Permissions introduced after migrations/0002 was applied. They are inserted (and granted to the default roles) by
+ * their own migration, so scripts/gen-access-sql.ts leaves them out of 0002.
+ */
+export const LATER_MIGRATION_PERMISSIONS: ReadonlySet<string> = new Set(['notifications.read_all', 'notifications.manage', 'notifications.broadcast'])
 
 export type Permission = keyof typeof PERMISSIONS
 export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[]
@@ -83,6 +93,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       'reports.company', 'reports.team',
       'files.manage_all',
       'users.manage', 'settings.manage', 'audit.read',
+      'notifications.broadcast',
     ],
   },
   {
@@ -97,6 +108,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       'attendance.manage', 'leave.approve', 'leave.manage',
       'calendar.manage', 'holidays.manage',
       'reports.team',
+      'notifications.broadcast',
     ],
   },
   {

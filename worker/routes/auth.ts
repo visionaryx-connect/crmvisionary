@@ -12,6 +12,7 @@ import {
 } from '../lib/session'
 import { generateTotpSecret, otpauthUri, verifyTotp } from '../lib/totp'
 import { notify, usersWithPermission } from '../services/notify'
+import { isNewDevice, securityNotice } from '../services/moduleNotifications'
 import { disconnect } from '../services/realtime'
 
 const LOCK_THRESHOLD = 5
@@ -66,7 +67,7 @@ auth.post('/login', async (c) => {
           summary: lock ? `Account locked after ${LOCK_THRESHOLD} failed sign-ins` : `Failed sign-in for ${user.email}`, ip,
         }),
       ])
-      if (lock) await notify(c.env, c.executionCtx, [{ userId: user.id, kind: 'security', title: 'Your account was temporarily locked', body: 'Several failed sign-in attempts were made. If this was not you, reset your password.' }])
+      if (lock) await notify(c.env, c.executionCtx, [{ userId: user.id, event: 'SECURITY_ACCOUNT_LOCKED', title: 'Your account was temporarily locked', body: 'Several failed sign-in attempts were made. If this was not you, reset your password.', link: '/account', email: { intro: `Your account was locked for ${LOCK_MINUTES} minutes after ${LOCK_THRESHOLD} failed sign-in attempts.`, details: [['IP address', ip], ['Time', new Date().toISOString()]], outro: 'If this was not you, ask an administrator to reset your password.' } }])
     } else {
       await logActivity(c.env.DB, { category: 'security', actorType: 'system', action: 'auth.login_failed', summary: 'Failed sign-in for unknown email', ip })
     }
@@ -83,7 +84,12 @@ auth.post('/login', async (c) => {
     updates.push(c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashPassword(input.password), user.id))
   }
   await c.env.DB.batch(updates)
+  const ua = (c.req.header('user-agent') ?? '').slice(0, 300) || null
+  const newDevice = await isNewDevice(c.env.DB, user.id, ua)
   const { csrfToken } = await createStaffSession(c, user.id, mfaState)
+  if (newDevice) {
+    await securityNotice(c.env, c.executionCtx, user.id, 'SECURITY_NEW_LOGIN', 'New sign-in to your account', 'Your account was signed in from a browser or device not used before.', [['IP address', ip], ['Browser', (ua ?? '').slice(0, 120)], ['Time', new Date().toISOString()]])
+  }
   return c.json({ mfa: mfaState === 'pending' ? 'required' : mfaState === 'enrol_required' ? 'enrol' : null, csrfToken })
 })
 
@@ -147,7 +153,7 @@ auth.post('/mfa/verify', requireStaff({ allowMfaPending: true }), async (c) => {
   await revokeSession(c.env, a.sessionId, 'mfa_rotated')
   const { csrfToken } = await createStaffSession(c, a.userId, 'verified')
   if (method === 'recovery') {
-    await notify(c.env, c.executionCtx, [{ userId: a.userId, kind: 'security', title: 'A recovery code was used to sign in', body: 'If this was not you, contact an administrator immediately.' }])
+    await notify(c.env, c.executionCtx, [{ userId: a.userId, event: 'SECURITY_RECOVERY_CODE_USED', title: 'A recovery code was used to sign in', body: 'If this was not you, contact an administrator immediately.', link: '/account' }])
   }
   return c.json({ ok: true, csrfToken })
 })
@@ -187,6 +193,7 @@ auth.post('/mfa/enable', requireStaff({ allowEnrolment: true }), async (c) => {
     activity(c.env.DB, { category: 'security', actorId: a.userId, action: 'auth.mfa_enabled', entityType: 'user', entityId: a.userId, summary: 'Enabled two-factor authentication', ip: clientIp(c) }),
   ])
   await revokeUserSessions(c.env, a.userId, 'mfa_enabled')
+  await securityNotice(c.env, c.executionCtx, a.userId, 'SECURITY_MFA_CHANGED', 'Two-factor authentication enabled', 'Two-factor authentication was turned on for your account.')
   const { csrfToken } = await createStaffSession(c, a.userId, 'verified')
   return c.json({ recoveryCodes: codes, csrfToken })
 })
@@ -204,6 +211,7 @@ auth.post('/mfa/disable', requireStaff(), async (c) => {
     c.env.DB.prepare('DELETE FROM mfa_recovery_codes WHERE user_id = ?').bind(a.userId),
     activity(c.env.DB, { category: 'security', actorId: a.userId, action: 'auth.mfa_disabled', summary: 'Disabled two-factor authentication', ip: clientIp(c) }),
   ])
+  await securityNotice(c.env, c.executionCtx, a.userId, 'SECURITY_MFA_CHANGED', 'Two-factor authentication disabled', 'Two-factor authentication was turned off for your account.')
   return c.json({ ok: true })
 })
 
@@ -221,6 +229,7 @@ auth.post('/password/change', requireStaff(), async (c) => {
     activity(c.env.DB, { category: 'security', actorId: a.userId, action: 'auth.password_changed', summary: 'Changed password; other sessions signed out', ip: clientIp(c) }),
   ])
   await revokeUserSessions(c.env, a.userId, 'password_changed', a.sessionId)
+  await securityNotice(c.env, c.executionCtx, a.userId, 'SECURITY_PASSWORD_CHANGED', 'Your password was changed', 'The password for your account was changed and other sessions were signed out.', [['IP address', clientIp(c) ?? 'unknown']])
   return c.json({ ok: true })
 })
 
@@ -236,7 +245,7 @@ auth.post('/password/forgot', async (c) => {
   if (user && user.status === 'active') {
     const admins = await usersWithPermission(c.env.DB, 'users.manage')
     await notify(c.env, c.executionCtx, admins.map((id) => ({
-      userId: id, kind: 'security' as const, title: `Password reset requested by ${user.name}`, body: 'Verify the request with the person, then issue a reset link from Users.', link: `/admin/users?focus=${user.id}`,
+      userId: id, event: 'SECURITY_PASSWORD_RESET_REQUESTED' as const, title: `Password reset requested by ${user.name}`, body: 'Verify the request with the person, then issue a reset link from Users.', link: `/admin/users?focus=${user.id}`,
       dedupeKey: `pwreset:${user.id}:${nowIso().slice(0, 13)}`,
     })))
     await logActivity(c.env.DB, { category: 'security', actorId: user.id, action: 'auth.reset_requested', entityType: 'user', entityId: user.id, summary: 'Requested a password reset', ip: clientIp(c) })
@@ -281,6 +290,7 @@ auth.post('/password/reset', async (c) => {
   ])
   await revokeUserSessions(c.env, row.user_id, 'password_reset')
   disconnect(c.env, c.executionCtx, { userId: row.user_id })
+  if (!activation) await securityNotice(c.env, c.executionCtx, row.user_id, 'SECURITY_PASSWORD_CHANGED', 'Your password was reset', 'Your password was reset with a one-time link and all sessions were signed out.', [['IP address', clientIp(c) ?? 'unknown']])
   return c.json({ ok: true })
 })
 

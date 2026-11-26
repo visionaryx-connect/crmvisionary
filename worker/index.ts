@@ -5,7 +5,7 @@ import { ApiError } from './lib/http'
 import { resolveStaffSession, staffCookieName } from './lib/session'
 import { resolvePortalSession } from './routes/portal'
 import { hub } from './services/realtime'
-import { runScheduled } from './services/scheduled'
+import { runCron } from './services/scheduled'
 import type { SocketIdentity } from './do/RealtimeHub'
 import authRoutes from './routes/auth'
 import adminRoutes from './routes/admin'
@@ -18,6 +18,8 @@ import fileRoutes from './routes/files'
 import calendarRoutes from './routes/calendar'
 import hrRoutes from './routes/hr'
 import notificationRoutes from './routes/notifications'
+import notificationAdminRoutes from './routes/notificationAdmin'
+import webhookRoutes from './routes/webhooks'
 import reportRoutes from './routes/reports'
 import dashboardRoutes from './routes/dashboard'
 import portalRoutes from './routes/portal'
@@ -61,7 +63,9 @@ api.route('/tasks', taskRoutes)
 api.route('/files', fileRoutes)
 api.route('/calendar', calendarRoutes)
 api.route('/hr', hrRoutes)
+api.route('/notifications/admin', notificationAdminRoutes)
 api.route('/notifications', notificationRoutes)
+api.route('/webhooks', webhookRoutes)
 api.route('/reports', reportRoutes)
 api.route('/dashboard', dashboardRoutes)
 api.route('/portal', portalRoutes)
@@ -115,7 +119,7 @@ app.get('/ws/portal', async (c) => {
 export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runScheduled(env, ctx, new Date(controller.scheduledTime)))
+    ctx.waitUntil(runCron(env, ctx, controller.cron, new Date(controller.scheduledTime)))
   },
 } satisfies ExportedHandler<Env>
 

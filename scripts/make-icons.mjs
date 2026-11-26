@@ -1,39 +1,70 @@
-// Generates the PWA / home-screen icons from one vector design (moon orb + "X" badge on carbon).
-// Run: node scripts/make-icons.mjs   (uses sharp, already installed as a dependency)
+// Generates every logo, favicon and PWA / home-screen icon from the official Visionary X logo
+// (public/brand/visionary-x-logo.png: the orb with its VX badge above the "Visionary X by IPG" wordmark).
+// The mark is never redrawn: the orb is cut out of the official artwork and only scaled.
+// Run: node scripts/make-icons.mjs   (uses sharp, already installed)
 import sharp from 'sharp'
 import { writeFileSync } from 'node:fs'
 
-/** pad = fraction of the canvas kept empty around the orb (maskable icons need a safe zone). */
-const svg = (pad = 0.16, rounded = false) => {
-  const s = 512
-  const r = (s * (1 - pad * 2)) / 2
-  const cx = s / 2
-  const cy = s / 2
-  const br = r * 0.36
-  const bx = cx + r * 0.62
-  const by = cy - r * 0.62
-  const arm = br * 0.42
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">
-  <defs>
-    <radialGradient id="g" cx="0.34" cy="0.30" r="0.85">
-      <stop offset="0" stop-color="#ffffff"/><stop offset="0.38" stop-color="#e9e8e4"/>
-      <stop offset="0.72" stop-color="#a9a8a4"/><stop offset="1" stop-color="#5c5b58"/>
-    </radialGradient>
-  </defs>
-  <rect width="${s}" height="${s}" ${rounded ? 'rx="112"' : ''} fill="#0c0c0c"/>
-  <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#g)"/>
-  <circle cx="${bx}" cy="${by}" r="${br}" fill="#0c0c0c"/>
-  <path d="M${bx - arm} ${by - arm} L${bx + arm} ${by + arm} M${bx + arm} ${by - arm} L${bx - arm} ${by + arm}" stroke="#fbfaf7" stroke-width="${br * 0.26}" stroke-linecap="round"/>
-</svg>`
-}
+const SOURCE = 'public/brand/visionary-x-logo.png'
+const CARBON = { r: 12, g: 12, b: 12, alpha: 1 }
 
-const out = async (file, size, pad, rounded = false) => {
-  await sharp(Buffer.from(svg(pad, rounded))).resize(size, size).png().toFile(file)
+// ── 1. Find the orb: the non-white region above the wordmark. Its top, bottom and left edges are the grey shade
+//      side of the sphere, so they define the circle even where the highlight is close to white.
+const { data, info } = await sharp(SOURCE).flatten({ background: '#ffffff' }).raw().toBuffer({ resolveWithObject: true })
+const { width: W, height: H, channels: C } = info
+const isInk = (x, y) => {
+  const i = (y * W + x) * C
+  return data[i] < 238 || data[i + 1] < 238 || data[i + 2] < 238
+}
+// The wordmark starts at the first fully white band below the orb.
+let orbBottom = 0
+let top = H
+let left = W
+for (let y = 0; y < H; y++) {
+  let any = false
+  for (let x = 0; x < W; x += 2) if (isInk(x, y)) { any = true; if (x < left) left = x; break }
+  if (any) { if (y < top) top = y; orbBottom = y } else if (orbBottom && y - orbBottom > 20) break
+}
+const d = orbBottom - top + 1
+const cx = left + d / 2
+const cy = top + d / 2
+console.log(`orb: top ${top} left ${left} diameter ${d}`)
+
+// ── 2. Cut it out with a circular alpha mask (1.5px inside the edge so no white fringe shows on dark).
+const size = Math.round(d)
+const r = size / 2 - 1.5
+const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="#fff"/></svg>`)
+const orb = await sharp(SOURCE)
+  .extract({ left: Math.round(cx - size / 2), top: Math.round(cy - size / 2), width: size, height: size })
+  .composite([{ input: mask, blend: 'dest-in' }])
+  .png()
+  .toBuffer()
+
+const save = async (file, buf) => {
+  await sharp(buf).png({ compressionLevel: 9 }).toFile(file)
   console.log('wrote', file)
 }
-await out('public/icons/icon-192.png', 192, 0.14)
-await out('public/icons/icon-512.png', 512, 0.14)
-await out('public/icons/maskable-512.png', 512, 0.24) // Android adaptive icons crop to a circle/squircle
-await out('public/icons/apple-touch-icon.png', 180, 0.14) // iOS applies its own rounded corners
-writeFileSync('public/favicon.svg', svg(0.08, true))
+
+// Transparent orb for the app UI and emails.
+for (const s of [64, 128, 256, 512]) await save(`public/brand/vx-orb-${s}.png`, await sharp(orb).resize(s, s).toBuffer())
+
+/** The orb centred on a carbon square. pad = empty fraction on each side (maskable icons need a safe zone). */
+const onCarbon = async (canvas, pad, radius = 0) => {
+  const inner = Math.round(canvas * (1 - pad * 2))
+  const bg = radius
+    ? Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${canvas}" height="${canvas}"><rect width="${canvas}" height="${canvas}" rx="${radius}" fill="#0c0c0c"/></svg>`)
+    : await sharp({ create: { width: canvas, height: canvas, channels: 4, background: CARBON } }).png().toBuffer()
+  return sharp(bg).composite([{ input: await sharp(orb).resize(inner, inner).toBuffer(), gravity: 'center' }]).png().toBuffer()
+}
+
+await save('public/icons/icon-192.png', await onCarbon(192, 0.1))
+await save('public/icons/icon-512.png', await onCarbon(512, 0.1))
+await save('public/icons/maskable-512.png', await onCarbon(512, 0.2)) // Android crops adaptive icons to a circle/squircle
+await save('public/icons/apple-touch-icon.png', await onCarbon(180, 0.1)) // iOS adds its own rounded corners
+await save('public/favicon-32.png', await onCarbon(32, 0.04, 7))
+await save('public/favicon-64.png', await onCarbon(64, 0.04, 14))
+
+// favicon.svg keeps working for browsers that ask for it: it wraps the raster mark rather than redrawing it.
+const fav = (await onCarbon(128, 0.04, 28)).toString('base64')
+writeFileSync('public/favicon.svg', `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><image width="128" height="128" href="data:image/png;base64,${fav}"/></svg>\n`)
 console.log('wrote public/favicon.svg')

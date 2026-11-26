@@ -2,3 +2,14 @@
 SESSION_SECRET=dev-only-session-secret-change-me-0123456789abcdef
 # 32 random bytes, base64. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 DATA_KEY=REPLACE_WITH_BASE64_32_BYTES
+
+# ── Notifications (optional; each channel stays off until set). See docs/NOTIFICATIONS.md ──
+# Brevo transactional email. Use a TEST/sandbox sender locally — real addresses will receive mail.
+# BREVO_API_KEY=xkeysib-...
+# BREVO_SENDER_EMAIL=notifications@your-verified-domain
+# BREVO_SENDER_NAME=Visionary X
+# BREVO_WEBHOOK_SECRET=REPLACE_WITH_32_RANDOM_CHARS
+# Web Push (generate with: node scripts/gen-vapid.mjs)
+# VAPID_PUBLIC_KEY=
+# VAPID_PRIVATE_KEY=
+# VAPID_SUBJECT=mailto:it@visionary-x.in

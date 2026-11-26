@@ -12,6 +12,19 @@ export interface Env {
   COMPANY_TIMEZONE: string
   SESSION_SECRET: string
   DATA_KEY: string
+  // ── Notifications (all optional: a channel stays off until its secrets are set) ──
+  /** Brevo transactional email API key (Worker secret). */
+  BREVO_API_KEY?: string
+  /** Verified sender address in Brevo, e.g. notifications@visionary-x.in (var). */
+  BREVO_SENDER_EMAIL?: string
+  BREVO_SENDER_NAME?: string
+  /** Shared secret Brevo sends in the X-VX-Webhook-Token header (or as a bearer token) on webhook calls (secret). */
+  BREVO_WEBHOOK_SECRET?: string
+  /** Web Push VAPID keys: public key is served to browsers, private key never leaves the Worker (secret). */
+  VAPID_PUBLIC_KEY?: string
+  VAPID_PRIVATE_KEY?: string
+  /** mailto: or https: contact for push services, e.g. mailto:it@visionary-x.in (var). */
+  VAPID_SUBJECT?: string
 }
 
 export interface StaffAuth {

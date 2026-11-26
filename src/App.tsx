@@ -34,6 +34,7 @@ const Files = lazy(() => import('@/pages/Files'))
 const Settings = lazy(() => import('@/pages/Settings'))
 const Users = lazy(() => import('@/pages/admin/Users'))
 const Audit = lazy(() => import('@/pages/admin/Audit'))
+const NotificationCenter = lazy(() => import('@/pages/admin/NotificationCenter'))
 const Account = lazy(() => import('@/pages/Account'))
 const Guide = lazy(() => import('@/pages/Guide'))
 const PortalAccess = lazy(() => import('@/pages/portal/PortalAccess'))
@@ -100,6 +101,7 @@ function Workspace() {
               <Route path="files" element={<Files />} />
               <Route path="settings" element={<RequirePerm perms={['settings.manage', 'holidays.manage', 'departments.manage', 'leave.manage']}><Settings /></RequirePerm>} />
               <Route path="admin/users" element={<RequirePerm perms={['users.manage', 'roles.manage', 'security.manage']}><Users /></RequirePerm>} />
+              <Route path="admin/notifications" element={<RequirePerm perms={['notifications.read_all', 'notifications.manage', 'notifications.broadcast', 'attendance.manage']}><NotificationCenter /></RequirePerm>} />
               <Route path="admin/audit" element={<RequirePerm perms={['audit.read', 'security.manage']}><Audit /></RequirePerm>} />
               <Route path="account" element={<Account />} />
               <Route path="guide" element={<Guide />} />
@@ -116,8 +118,9 @@ function Workspace() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <BrowserRouter>
+      {/* Toasts render router <Link>s (live notification toasts), so the provider must sit inside the router. */}
+      <BrowserRouter>
+        <ToastProvider>
           <Suspense fallback={<Splash />}>
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -133,8 +136,8 @@ export default function App() {
               <Route path="/*" element={<Workspace />} />
             </Routes>
           </Suspense>
-        </BrowserRouter>
-      </ToastProvider>
+        </ToastProvider>
+      </BrowserRouter>
     </QueryClientProvider>
   )
 }

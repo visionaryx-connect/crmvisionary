@@ -91,18 +91,18 @@ export default function Projects() {
   return (
     <div>
       <PageHeader eyebrow="Delivery" title="Projects" meta={list.data && <span>{list.data.length} shown</span>} actions={can('projects.create') && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => set('new', '1')}>New project</Button>} />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative w-full max-w-xs">
+      <div className="mb-4 grid grid-cols-[1fr_auto] items-center gap-2 sm:flex sm:flex-wrap">
+        <div className="relative col-span-2 w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-faint" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, reference, client" className="pl-8" aria-label="Search projects" />
         </div>
-        <Select value={status} onChange={(e) => set('status', e.target.value)} className="w-44" aria-label="Status filter">
+        <Select value={status} onChange={(e) => set('status', e.target.value)} className="w-full sm:w-44" aria-label="Status filter">
           <option value="active">Active</option>
           <option value="">All (not archived)</option>
           {PROJECT_STATUSES.map((s) => <option key={s} value={s}>{PROJECT_STATUS_LABEL[s]}</option>)}
         </Select>
-        <label className="ml-1 flex items-center gap-2 text-[13px] text-ink-2"><input type="checkbox" className="accent-accent" checked={mine} onChange={(e) => set('mine', e.target.checked ? '1' : null)} /> Only mine</label>
-        <div className="ml-auto flex rounded-md border border-line bg-surface p-0.5" role="group" aria-label="View">
+        <label className="flex items-center gap-2 whitespace-nowrap text-[13px] text-ink-2 sm:ml-1"><input type="checkbox" className="accent-accent" checked={mine} onChange={(e) => set('mine', e.target.checked ? '1' : null)} /> Only mine</label>
+        <div className="col-span-2 ml-auto flex rounded-md border border-line bg-surface p-0.5" role="group" aria-label="View">
           <button className={cx('rounded px-2 py-1', view === 'table' && 'bg-subtle')} onClick={() => setView('table')} aria-pressed={view === 'table'} aria-label="Table view"><LayoutList className="size-4" /></button>
           <button className={cx('rounded px-2 py-1', view === 'cards' && 'bg-subtle')} onClick={() => setView('cards')} aria-pressed={view === 'cards'} aria-label="Card view"><Rows3 className="size-4" /></button>
         </div>

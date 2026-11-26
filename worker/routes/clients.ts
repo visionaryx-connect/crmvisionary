@@ -8,6 +8,7 @@ import { ApiError, body, clientIp, conflict, notFound, query } from '../lib/http
 import { requirePermission, requireStaff } from '../lib/session'
 import { readableProjectsFilter } from '../lib/authz'
 import { disconnect } from '../services/realtime'
+import { clientChanged, clientInteraction } from '../services/moduleNotifications'
 
 const clients = new Hono<AppBindings>()
 clients.use('*', requireStaff())
@@ -154,6 +155,7 @@ clients.post('/', requirePermission('clients.manage'), async (c) => {
     ...input.serviceCategoryIds.map((s) => c.env.DB.prepare('INSERT INTO client_service_categories (client_id, service_category_id) VALUES (?, ?)').bind(id, s)),
     activity(c.env.DB, { actorId: a.userId, action: 'client.created', entityType: 'client', entityId: id, summary: `Created client ${input.name} (${reference})`, ip: clientIp(c) }),
   ])
+  await clientChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, { created: true })
   return c.json({ id, reference }, 201)
 })
 
@@ -179,6 +181,8 @@ clients.put('/:id', requirePermission('clients.manage'), async (c) => {
     ...input.serviceCategoryIds.map((s) => c.env.DB.prepare('INSERT INTO client_service_categories (client_id, service_category_id) VALUES (?, ?)').bind(id, s)),
     activity(c.env.DB, { actorId: a.userId, action: 'client.updated', entityType: 'client', entityId: id, summary: `Updated client ${input.name}`, changes: diff(before, after), ip: clientIp(c) }),
   ])
+  const changes = diff(before, after)
+  if (changes.account_manager_id || changes.status) await clientChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, { changes })
   return c.json({ ok: true })
 })
 
@@ -264,6 +268,7 @@ clients.post('/:id/interactions', async (c) => {
   await c.env.DB.prepare('INSERT INTO client_interactions (id, client_id, project_id, kind, subject, body, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, clientId, input.projectId ?? null, input.kind, input.subject, input.body, new Date(input.occurredAt).toISOString(), a.userId, nowIso())
     .run()
+  await clientInteraction(c.env, c.executionCtx, clientId, { userId: a.userId, name: a.name }, input.kind, input.subject)
   return c.json({ id }, 201)
 })
 

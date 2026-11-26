@@ -22,8 +22,8 @@ function Directory() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap gap-2">
-        <div className="relative w-full max-w-xs"><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-faint" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people or skills" className="pl-8" aria-label="Search people" /></div>
-        <Select value={dept} onChange={(e) => setDept(e.target.value)} className="w-48" aria-label="Department"><option value="">All departments</option>{departments.data?.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}</Select>
+        <div className="relative w-full sm:max-w-xs"><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-faint" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people or skills" className="pl-8" aria-label="Search people" /></div>
+        <Select value={dept} onChange={(e) => setDept(e.target.value)} className="w-full sm:w-48" aria-label="Department"><option value="">All departments</option>{departments.data?.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}</Select>
       </div>
       <QueryState q={list}>
         {(rows) => {

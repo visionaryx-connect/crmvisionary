@@ -12,7 +12,7 @@ import { newId } from '../lib/crypto'
 import { diff, many, nowIso, one, patchColumns, placeholders } from '../lib/db'
 import { ApiError, body, clientIp, conflict, forbidden, notFound, query } from '../lib/http'
 import { requireStaff } from '../lib/session'
-import { notify, projectReviewers } from '../services/notify'
+import { taskAssigned, taskChanged, taskCommentEdited, taskCommented, taskReviewed, taskStatusChanged, taskSubmitted, taskUnassigned, validMentions } from '../services/taskNotifications'
 import { onTaskAssigned } from '../services/automations'
 import { recalcProgress } from '../services/progress'
 import { publish, rooms } from '../services/realtime'
@@ -269,7 +269,7 @@ tasks.post('/', async (c) => {
   if (input.responsibleId) await onTaskAssigned(c.env, c.executionCtx, id)
   await recalcProgress(c.env, c.executionCtx, input.projectId)
   const recipients = [...(input.responsibleId ? [input.responsibleId] : []), ...assignees]
-  await notify(c.env, c.executionCtx, recipients.map((u) => ({ userId: u, kind: 'task_assigned' as const, title: `New task: ${input.title}`, body: `${access.project.reference} · ${input.dueDate ? `due ${input.dueDate}` : 'no due date'}`, link: `/tasks/${id}`, entityType: 'task', entityId: id })), a.userId)
+  await taskAssigned(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, recipients, { isNew: true })
   publish(c.env, c.executionCtx, [
     { type: 'task.created', room: rooms.project(input.projectId), data: { taskId: id, projectId: input.projectId } },
     ...recipients.map((u) => ({ type: 'task.assigned' as const, room: rooms.user(u), data: { taskId: id, projectId: input.projectId } })),
@@ -296,7 +296,7 @@ tasks.get('/:id', async (c) => {
     many(c.env.DB, 'SELECT s.*, u.name AS done_by_name FROM subtasks s LEFT JOIN users u ON u.id = s.done_by WHERE s.task_id = ? ORDER BY s.sort_order, s.created_at', id),
     many(c.env.DB, 'SELECT t.id, t.number, t.title, t.status FROM task_dependencies td JOIN tasks t ON t.id = td.depends_on_task_id WHERE td.task_id = ?', id),
     many(c.env.DB, 'SELECT t.id, t.number, t.title, t.status FROM task_dependencies td JOIN tasks t ON t.id = td.task_id WHERE td.depends_on_task_id = ?', id),
-    many(c.env.DB, `SELECT cm.id, cm.body, cm.created_at, cm.edited_at, cm.author_id, u.name AS author_name, u.avatar_color FROM comments cm JOIN users u ON u.id = cm.author_id WHERE cm.entity_type = 'task' AND cm.entity_id = ? AND cm.deleted_at IS NULL ORDER BY cm.created_at`, id),
+    many(c.env.DB, `SELECT cm.id, cm.body, cm.created_at, cm.edited_at, cm.author_id, cm.parent_id, cm.mentions, u.name AS author_name, u.avatar_color FROM comments cm JOIN users u ON u.id = cm.author_id WHERE cm.entity_type = 'task' AND cm.entity_id = ? AND cm.deleted_at IS NULL ORDER BY cm.created_at`, id),
     many(c.env.DB, 'SELECT te.id, te.user_id, u.name AS user_name, te.work_date, te.minutes, te.note, te.created_at FROM time_entries te JOIN users u ON u.id = te.user_id WHERE te.task_id = ? ORDER BY te.work_date DESC, te.created_at DESC', id),
     many(c.env.DB, 'SELECT a.id, a.file_name, a.content_type, a.size_bytes, a.created_at, u.name AS uploaded_by_name, a.deliverable_id FROM attachments a LEFT JOIN users u ON u.id = a.uploaded_by WHERE a.task_id = ? AND a.deleted_at IS NULL ORDER BY a.created_at DESC', id),
     many(c.env.DB, 'SELECT s.*, u.name AS submitted_by_name, d.name AS decided_by_name FROM task_submissions s JOIN users u ON u.id = s.submitted_by LEFT JOIN users d ON d.id = s.decided_by WHERE s.task_id = ? ORDER BY s.submitted_at DESC', id),
@@ -316,7 +316,15 @@ tasks.get('/:id', async (c) => {
     : shareRow.mode === 'equal' ? (shareRow.applicable > 0 ? Math.round((1 / shareRow.applicable) * 1000) / 10 : null)
     : null
   const changeLog = await many(c.env.DB, `SELECT l.summary, l.changes, l.created_at, u.name AS actor_name FROM activity_logs l LEFT JOIN users u ON u.id = l.actor_id WHERE l.entity_type = 'task' AND l.entity_id = ? ORDER BY l.created_at DESC LIMIT 50`, id)
+  // People who can be @mentioned: the project's active team (they can all read this task).
+  const mentionable = await many(
+    c.env.DB,
+    `SELECT u.id, u.name FROM users u WHERE u.status = 'active' AND (u.id = (SELECT manager_id FROM projects WHERE id = ?) OR u.id IN (SELECT user_id FROM project_members WHERE project_id = ?)) ORDER BY u.name`,
+    task.project_id,
+    task.project_id,
+  )
   return c.json({
+    mentionable,
     task: { ...row, requires_approval: Boolean(row?.requires_approval) },
     progressMode: shareRow?.mode ?? 'equal',
     projectShare,
@@ -324,7 +332,7 @@ tasks.get('/:id', async (c) => {
     subtasks: subtasks.map((s) => ({ ...(s as object), done: Boolean((s as { done: number }).done) })),
     dependsOn,
     blocking,
-    comments,
+    comments: (comments as { mentions?: string }[]).map((cm) => ({ ...cm, mentions: JSON.parse(cm.mentions || '[]') as string[] })),
     timeEntries: time,
     attachments,
     submissions,
@@ -395,10 +403,14 @@ tasks.patch('/:id', async (c) => {
     ...(changes.responsible_id && newResponsible ? [newResponsible] : []),
     ...newAssignees.filter((u) => !currentAssignees.includes(u)),
   ]
-  await notify(c.env, c.executionCtx, newlyAssigned.map((u) => ({ userId: u, kind: 'task_assigned' as const, title: `Assigned to you: ${input.title ?? task.title}`, body: access.project.reference, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id })), a.userId)
-  if (changes.due_date && newResponsible) {
-    await notify(c.env, c.executionCtx, [{ userId: newResponsible, kind: 'calendar_changed', title: `Due date changed: ${task.title}`, body: `${changes.due_date.from ?? 'none'} → ${changes.due_date.to ?? 'none'}`, link: `/tasks/${task.id}` }], a.userId)
-  }
+  const actor = { userId: a.userId, name: a.name }
+  await taskAssigned(c.env, c.executionCtx, task.id, actor, newlyAssigned, { reassigned: Boolean(changes.responsible_id && before.responsible_id) })
+  const removed = [
+    ...(changes.responsible_id && before.responsible_id && before.responsible_id !== newResponsible && !newAssignees.includes(before.responsible_id as string) ? [before.responsible_id as string] : []),
+    ...(input.assigneeIds ? currentAssignees.filter((u) => !newAssignees.includes(u) && u !== newResponsible) : []),
+  ]
+  await taskUnassigned(c.env, c.executionCtx, task.id, actor, removed)
+  await taskChanged(c.env, c.executionCtx, task.id, actor, Object.fromEntries(Object.entries(changes).filter(([k]) => ['due_date', 'priority', 'description', 'title'].includes(k))))
   publish(c.env, c.executionCtx, [
     { type: 'task.updated', room: rooms.project(task.project_id), data: { taskId: task.id, projectId: task.project_id, fields: Object.keys(changes) } },
     ...newlyAssigned.map((u) => ({ type: 'task.assigned' as const, room: rooms.user(u), data: { taskId: task.id, projectId: task.project_id } })),
@@ -476,10 +488,7 @@ tasks.post('/:id/status', async (c) => {
   if (stmts.length === 0) return c.json({ ok: true })
   await c.env.DB.batch(stmts)
   await recalcProgress(c.env, c.executionCtx, ctx.task.project_id)
-  if (input.status === 'blocked') {
-    const reviewers = await projectReviewers(c.env.DB, ctx.task.project_id)
-    await notify(c.env, c.executionCtx, reviewers.map((u) => ({ userId: u, kind: 'mention' as const, title: `Blocked: #${ctx.task.number} ${ctx.task.title}`, body: input.blockedReason ?? '', link: `/tasks/${ctx.task.id}` })), a.userId)
-  }
+  await taskStatusChanged(c.env, c.executionCtx, ctx.task.id, { userId: a.userId, name: a.name }, ctx.task.status as TaskStatus, input.status, input.status === 'blocked' ? input.blockedReason : input.note)
   publish(c.env, c.executionCtx, [{ type: 'task.updated', room: rooms.project(ctx.task.project_id), data: { taskId: ctx.task.id, projectId: ctx.task.project_id, status: input.status } }])
   return c.json({ ok: true })
 })
@@ -492,7 +501,10 @@ tasks.post('/:id/move', async (c) => {
   const stmts = input.status ? await transition(c.env.DB, { auth: a, ...ctx }, input.status, 'Moved on board', input.blockedReason) : []
   stmts.push(c.env.DB.prepare('UPDATE tasks SET sort_order = ? WHERE id = ?').bind(input.sortOrder, ctx.task.id))
   await c.env.DB.batch(stmts)
-  if (input.status && input.status !== ctx.task.status) await recalcProgress(c.env, c.executionCtx, ctx.task.project_id)
+  if (input.status && input.status !== ctx.task.status) {
+    await recalcProgress(c.env, c.executionCtx, ctx.task.project_id)
+    await taskStatusChanged(c.env, c.executionCtx, ctx.task.id, { userId: a.userId, name: a.name }, ctx.task.status as TaskStatus, input.status, input.blockedReason)
+  }
   publish(c.env, c.executionCtx, [{ type: 'task.updated', room: rooms.project(ctx.task.project_id), data: { taskId: ctx.task.id, projectId: ctx.task.project_id, status: input.status ?? ctx.task.status } }])
   return c.json({ ok: true })
 })
@@ -523,8 +535,7 @@ tasks.post('/:id/submit', async (c) => {
     c.env.DB.prepare('INSERT INTO task_status_history (id, task_id, project_id, from_status, to_status, note, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(newId('tsh'), task.id, task.project_id, task.status, 'in_review', (note || 'Submitted for review') + countLabel, a.userId, now),
     activity(c.env.DB, { actorId: a.userId, action: 'task.submitted', entityType: 'task', entityId: task.id, projectId: task.project_id, summary: `Submitted #${task.number} ${task.title} for review${countLabel}` }),
   ])
-  const reviewers = await projectReviewers(c.env.DB, task.project_id)
-  await notify(c.env, c.executionCtx, reviewers.map((u) => ({ userId: u, kind: 'review_requested' as const, title: `Review requested: #${task.number} ${task.title}`, body: `${a.name} · ${access.project.reference}`, link: `/tasks/${task.id}`, entityType: 'task', entityId: task.id })), a.userId)
+  await taskSubmitted(c.env, c.executionCtx, task.id, { userId: a.userId, name: a.name }, note + countLabel)
   publish(c.env, c.executionCtx, [{ type: 'task.submitted', room: rooms.project(task.project_id), data: { taskId: task.id, projectId: task.project_id } }])
   return c.json({ ok: true, submissionId: sid })
 })
@@ -565,19 +576,15 @@ tasks.post('/:id/review', async (c) => {
   ])
   await recalcProgress(c.env, c.executionCtx, task.project_id)
   const recipients = [...new Set([sub.submitted_by, task.responsible_id].filter(Boolean) as string[])]
-  await notify(
+  await taskReviewed(
     c.env,
     c.executionCtx,
-    recipients.map((u) => ({
-      userId: u,
-      kind: approved ? ('task_approved' as const) : ('revision_requested' as const),
-      title: approved ? `${partial ? approvalNote : 'Approved'}: #${task.number} ${task.title}` : `Revisions requested: #${task.number} ${task.title}`,
-      body: input.note,
-      link: `/tasks/${task.id}`,
-      entityType: 'task',
-      entityId: task.id,
-    })),
-    a.userId,
+    task.id,
+    { userId: a.userId, name: a.name },
+    recipients,
+    approved,
+    approved ? `${partial ? approvalNote : 'Approved'}: #${task.number} ${task.title}` : `Revisions requested: #${task.number} ${task.title}`,
+    input.note,
   )
   publish(c.env, c.executionCtx, [{ type: approved ? 'task.approved' : 'task.revision_requested', room: rooms.project(task.project_id), data: { taskId: task.id, projectId: task.project_id } }])
   return c.json({ ok: true })
@@ -621,7 +628,9 @@ tasks.post('/bulk', async (c) => {
   if (input.action === 'assign' && input.responsibleId) for (const t of rows) await onTaskAssigned(c.env, c.executionCtx, t.id)
   for (const pid of projectsTouched) await recalcProgress(c.env, c.executionCtx, pid)
   if (input.action === 'assign' && input.responsibleId) {
-    await notify(c.env, c.executionCtx, [{ userId: input.responsibleId, kind: 'task_assigned', title: `${rows.length} task(s) assigned to you`, link: '/tasks?mine=1' }], a.userId)
+    for (const t of rows.filter((r) => r.responsible_id !== input.responsibleId).slice(0, 25)) {
+      await taskAssigned(c.env, c.executionCtx, t.id, { userId: a.userId, name: a.name }, [input.responsibleId], { reassigned: Boolean(t.responsible_id) })
+    }
   }
   publish(c.env, c.executionCtx, [...projectsTouched].map((pid) => ({ type: 'task.updated' as const, room: rooms.project(pid), data: { projectId: pid, bulk: true } })))
   return c.json({ ok: true, updated: rows.length })
@@ -671,13 +680,36 @@ tasks.post('/:id/comments', async (c) => {
   const a = c.get('auth')
   const { task, access, isAssignee } = await taskAccess(c.env.DB, a, c.req.param('id'))
   if (!access.canContribute && !isAssignee) throw forbidden('Viewers cannot comment')
-  const { body: text } = await body(c, commentSchema)
+  const { body: text, parentId: rawParent, mentions: rawMentions } = await body(c, commentSchema)
+  let parentId: string | null = null
+  if (rawParent) {
+    const parent = await one<{ id: string; parent_id: string | null }>(c.env.DB, `SELECT id, parent_id FROM comments WHERE id = ? AND entity_type = 'task' AND entity_id = ? AND deleted_at IS NULL`, rawParent, task.id)
+    if (!parent) throw new ApiError(422, 'VALIDATION_FAILED', 'The comment you replied to no longer exists', { fields: { parentId: 'Not found' } })
+    parentId = parent.parent_id ?? parent.id // one level of threading: replies to replies join the same thread
+  }
+  const mentions = await validMentions(c.env.DB, task.project_id, rawMentions)
   const id = newId('cmt')
-  await c.env.DB.prepare(`INSERT INTO comments (id, entity_type, entity_id, project_id, author_id, body, created_at) VALUES (?, 'task', ?, ?, ?, ?, ?)`).bind(id, task.id, task.project_id, a.userId, text, nowIso()).run()
-  const watchers = [task.responsible_id, ...(await many<{ user_id: string }>(c.env.DB, 'SELECT user_id FROM task_assignees WHERE task_id = ?', task.id)).map((r) => r.user_id)].filter(Boolean) as string[]
-  await notify(c.env, c.executionCtx, [...new Set(watchers)].map((u) => ({ userId: u, kind: 'mention' as const, title: `${a.name} commented on #${task.number} ${task.title}`, body: text.slice(0, 160), link: `/tasks/${task.id}` })), a.userId)
+  await c.env.DB.prepare(`INSERT INTO comments (id, entity_type, entity_id, project_id, author_id, body, created_at, parent_id, mentions) VALUES (?, 'task', ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, task.id, task.project_id, a.userId, text, nowIso(), parentId, JSON.stringify(mentions))
+    .run()
+  await taskCommented(c.env, c.executionCtx, task.id, { userId: a.userId, name: a.name }, { id, body: text, parentId, mentions })
   publish(c.env, c.executionCtx, [{ type: 'task.updated', room: rooms.project(task.project_id), data: { taskId: task.id, projectId: task.project_id, fields: ['comments'] } }])
   return c.json({ id }, 201)
+})
+
+tasks.patch('/:id/comments/:cid', async (c) => {
+  const a = c.get('auth')
+  const { task } = await taskAccess(c.env.DB, a, c.req.param('id'))
+  const cm = await one<{ author_id: string; mentions: string }>(c.env.DB, `SELECT author_id, mentions FROM comments WHERE id = ? AND entity_type = 'task' AND entity_id = ? AND deleted_at IS NULL`, c.req.param('cid'), task.id)
+  if (!cm) throw notFound('Comment')
+  if (cm.author_id !== a.userId) throw forbidden('Only the author can edit a comment')
+  const { body: text, mentions: rawMentions } = await body(c, commentSchema)
+  const mentions = await validMentions(c.env.DB, task.project_id, rawMentions)
+  const before = JSON.parse(cm.mentions || '[]') as string[]
+  await c.env.DB.prepare('UPDATE comments SET body = ?, mentions = ?, edited_at = ? WHERE id = ?').bind(text, JSON.stringify([...new Set([...before, ...mentions])]), nowIso(), c.req.param('cid')).run()
+  await taskCommentEdited(c.env, c.executionCtx, task.id, { userId: a.userId, name: a.name }, { id: c.req.param('cid'), body: text, newMentions: mentions.filter((m) => !before.includes(m)) })
+  publish(c.env, c.executionCtx, [{ type: 'task.updated', room: rooms.project(task.project_id), data: { taskId: task.id, projectId: task.project_id, fields: ['comments'] } }])
+  return c.json({ ok: true })
 })
 
 tasks.delete('/:id/comments/:cid', async (c) => {

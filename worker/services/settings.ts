@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { many, nowIso, one } from '../lib/db'
 import { DEFAULT_WORKWEEK, type DayOffSource, type WorkweekSettings } from '@shared/workdays'
 
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM (24-hour)')
+
 export const SETTING_SCHEMAS = {
   'company.profile': z.object({
     name: z.string().trim().min(1).max(120),
@@ -37,6 +39,42 @@ export const SETTING_SCHEMAS = {
     projectAutoDelayed: z.boolean(),
     assignedBacklogToTodo: z.boolean(),
   }),
+  'notifications.schedule': z.object({
+    attendance: z.object({
+      enabled: z.boolean(),
+      reminder: hhmm, late: hhmm, missing: hhmm, exceptions: hhmm, checkoutReminder: hhmm, missingCheckout: hhmm, summary: hhmm,
+      /** Check-ins after this time count as late. */
+      lateAfter: hhmm,
+      /** Check-outs before this time count as early departures. */
+      earlyBefore: hhmm,
+    }),
+    tasks: z.object({
+      dailyDigest: z.boolean(), dailyDigestTime: hhmm,
+      remind24h: z.boolean(), remindToday: z.boolean(), remind2h: z.boolean(), remind30m: z.boolean(),
+    }),
+    reports: z.object({
+      daily: z.boolean(), weekly: z.boolean(), weeklyDay: z.number().int().min(0).max(6), weeklyTime: hhmm, monthly: z.boolean(), monthlyTime: hhmm,
+      /** Role keys that receive each report. */
+      recipients: z.object({ dailyHr: z.array(z.string()).max(10), dailyAdmin: z.array(z.string()).max(10), dailySuperAdmin: z.array(z.string()).max(10), weekly: z.array(z.string()).max(10), monthly: z.array(z.string()).max(10) }),
+    }),
+    meetings: z.object({ defaultReminderMinutes: z.number().int().min(0).max(240) }),
+    hr: z.object({ celebrations: z.boolean(), leaveReminders: z.boolean(), time: hhmm }),
+  }),
+  'notifications.escalation': z.object({
+    /** Employee overdue reminders stop after this many (days). */
+    maxOverdueReminders: z.number().int().min(1).max(30),
+    /** Days overdue before HR and Admin are told. 0 disables. */
+    taskOverdueHrAfterDays: z.number().int().min(0).max(60),
+    /** Days overdue before Super Admin is told, for the listed priorities. 0 disables. */
+    taskOverdueSuperAdminAfterDays: z.number().int().min(0).max(90),
+    superAdminPriorities: z.array(z.enum(['low', 'medium', 'high', 'urgent'])).max(4),
+    /** Hours before an unacknowledged announcement gets a reminder / the recipient's manager is told. 0 disables. */
+    ackReminderHours: z.number().int().min(0).max(240),
+    ackManagerHours: z.number().int().min(0).max(480),
+    /** Workload alerts: open tasks per person above this count; overdue tasks above this count. */
+    workloadOpenTasks: z.number().int().min(1).max(500),
+    workloadOverdueTasks: z.number().int().min(1).max(500),
+  }),
 } as const
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS
@@ -50,6 +88,20 @@ const DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   'portal.defaults': { linkValidityDays: 30, sessionHours: 8, reverifyMinutes: 15 },
   'reports.schedule': { monthlySnapshots: true },
   automations: { projectAutoStart: true, milestoneAutoStatus: true, dependencyReady: true, projectReadyForReview: true, projectAutoDelayed: true, assignedBacklogToTodo: true },
+  'notifications.schedule': {
+    attendance: { enabled: true, reminder: '09:45', late: '10:15', missing: '11:00', exceptions: '13:00', checkoutReminder: '18:00', missingCheckout: '18:30', summary: '19:00', lateAfter: '10:00', earlyBefore: '18:00' },
+    tasks: { dailyDigest: true, dailyDigestTime: '09:00', remind24h: true, remindToday: true, remind2h: true, remind30m: true },
+    reports: {
+      daily: true, weekly: true, weeklyDay: 1, weeklyTime: '09:30', monthly: true, monthlyTime: '10:00',
+      recipients: { dailyHr: ['hr_manager'], dailyAdmin: ['admin'], dailySuperAdmin: ['super_admin'], weekly: ['super_admin', 'admin', 'hr_manager'], monthly: ['super_admin', 'admin', 'hr_manager'] },
+    },
+    meetings: { defaultReminderMinutes: 15 },
+    hr: { celebrations: true, leaveReminders: true, time: '09:00' },
+  },
+  'notifications.escalation': {
+    maxOverdueReminders: 3, taskOverdueHrAfterDays: 2, taskOverdueSuperAdminAfterDays: 5, superAdminPriorities: ['urgent', 'high'],
+    ackReminderHours: 24, ackManagerHours: 48, workloadOpenTasks: 15, workloadOverdueTasks: 3,
+  },
 }
 
 export async function getSetting<K extends SettingKey>(db: D1Database, key: K): Promise<SettingValue<K>> {

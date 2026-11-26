@@ -33,24 +33,24 @@ export default function DailyTasks() {
   return (
     <div>
       <PageHeader eyebrow="Team visibility" title="Today's tasks" meta={<span>Read-only team view · Tasks visible to you through your projects · Asia/Kolkata</span>} />
-      <div className="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface p-4">
-        <label className="flex flex-col gap-1 text-xs text-muted">Date
-          <input type="date" value={date} onChange={e => setDate(e.target.value || todayIST())} className="h-9 rounded-md border border-line-strong bg-canvas px-3 text-sm text-ink" />
+      <div className="mb-5 grid grid-cols-2 items-end gap-3 rounded-xl border border-line bg-surface p-4 sm:flex sm:flex-wrap">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-muted">Date
+          <input type="date" value={date} onChange={e => setDate(e.target.value || todayIST())} className="h-9 w-full rounded-md border border-line-strong bg-canvas px-3 text-sm text-ink sm:w-auto" />
         </label>
         <button type="button" onClick={() => setDate(todayIST())} className="h-9 rounded-md border border-line px-3 text-sm text-ink hover:bg-subtle">Today</button>
-        <label className="flex flex-col gap-1 text-xs text-muted">Employee
-          <select value={employee} onChange={e => setEmployee(e.target.value)} className="h-9 rounded-md border border-line-strong bg-canvas px-2 text-sm text-ink">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-muted">Employee
+          <select value={employee} onChange={e => setEmployee(e.target.value)} className="h-9 w-full rounded-md border border-line-strong bg-canvas px-2 text-sm text-ink sm:w-auto">
             <option value="all">All employees</option><option value="unassigned">Unassigned</option>
             {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-muted">Project
-          <select value={project} onChange={e => setProject(e.target.value)} className="h-9 rounded-md border border-line-strong bg-canvas px-2 text-sm text-ink">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-muted">Project
+          <select value={project} onChange={e => setProject(e.target.value)} className="h-9 w-full rounded-md border border-line-strong bg-canvas px-2 text-sm text-ink sm:w-auto">
             <option value="all">All projects</option>{projects.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-muted">Status
-          <select value={status} onChange={e => setStatus(e.target.value)} className="h-9 rounded-md border border-line-strong bg-canvas px-2 text-sm text-ink">
+        <label className="col-span-2 flex min-w-0 flex-col gap-1 text-xs text-muted sm:col-span-1">Status
+          <select value={status} onChange={e => setStatus(e.target.value)} className="h-9 w-full rounded-md border border-line-strong bg-canvas px-2 text-sm text-ink sm:w-auto">
             <option value="all">All statuses</option>
             <option value="backlog">Backlog</option><option value="todo">To do</option><option value="in_progress">In progress</option>
             <option value="in_review">In review</option><option value="blocked">Blocked</option><option value="completed">Completed</option>

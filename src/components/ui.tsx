@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { Link } from 'react-router'
 import { AlertTriangle, Inbox, Loader2, Lock, RefreshCw, X } from 'lucide-react'
 import { initials } from '@/lib/format'
@@ -173,12 +173,13 @@ export function PageHeader({ eyebrow, title, meta, actions, children }: { eyebro
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           {eyebrow && <div className="eyebrow mb-1.5">{eyebrow}</div>}
-          <h1 className="display text-[30px] text-ink sm:text-[34px]">
+          <h1 className="display break-words text-[28px] text-ink sm:text-[34px]">
             {title}
           </h1>
           {meta && <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">{meta}</div>}
         </div>
-        {actions && <div className="no-print flex flex-wrap items-center gap-2">{actions}</div>}
+        {/* Phones: actions fill the row in equal halves; one too long for half takes a full row (never clipped). Larger screens: compact, right-aligned. */}
+        {actions && <div className="no-print flex w-full flex-wrap items-center gap-2 sm:w-auto [&>*]:flex-[1_1_calc(50%-0.25rem)] sm:[&>*]:flex-none [&>a>button]:w-full">{actions}</div>}
       </div>
       {children}
     </header>
@@ -189,7 +190,7 @@ export function Section({ title, description, actions, children, className }: { 
   return (
     <section className={cx('mb-8', className)}>
       {(title || actions) && (
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
+        <div className="mb-3 flex items-start justify-between gap-x-3 gap-y-2 sm:flex-wrap sm:items-end">
           <div className="min-w-0 flex-1 basis-[14rem]">
             {title && <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.16em] text-ink-2">{title}</h2>}
             {description && <p className="mt-0.5 text-[12.5px] text-muted">{description}</p>}
@@ -322,9 +323,12 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
     if (!d) return
     if (open && !d.open) {
       d.showModal()
-      // showModal() focuses the first focusable element (the close button); prefer the form's intended field.
-      const target = d.querySelector<HTMLElement>('[data-autofocus], [autofocus], input:not([type=hidden]):not([disabled]), textarea, select')
-      target?.focus()
+      // showModal() focuses the first focusable element (the close button); prefer the form's intended field —
+      // except on touch screens, where focusing a field would throw the keyboard up over the sheet straight away.
+      if (!window.matchMedia?.('(hover: none)').matches) {
+        const target = d.querySelector<HTMLElement>('[data-autofocus], [autofocus], input:not([type=hidden]):not([disabled]), textarea, select')
+        target?.focus()
+      }
     }
     if (!open && d.open) d.close()
   }, [open])
@@ -339,11 +343,13 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
       onClick={(e) => {
         if (e.target === ref.current) onClose()
       }}
-      className="m-auto max-h-[88vh] w-[calc(100vw-32px)] overflow-visible rounded-lg bg-transparent p-0 open:animate-rise"
-      style={{ maxWidth: width }}
+      // Phones: a bottom sheet (full width, slides up, rounded top). Larger screens: a centred dialog.
+      className="mx-0 mb-0 mt-auto max-h-[92dvh] w-full max-w-none overflow-visible bg-transparent p-0 open:animate-sheet motion-reduce:animate-none sm:m-auto sm:max-h-[88vh] sm:w-[calc(100vw-32px)] sm:max-w-[var(--dlg-w)] sm:rounded-lg sm:open:animate-rise"
+      style={{ '--dlg-w': `${width}px` } as CSSProperties}
     >
       {open && (
-        <div className="flex max-h-[88vh] flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-pop">
+        <div className="flex max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl border border-b-0 border-line bg-surface shadow-pop sm:max-h-[88vh] sm:rounded-lg sm:border-b">
+          <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-line-strong sm:hidden" aria-hidden />
           <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
             <div>
               <h2 className="font-display text-[19px] font-semibold leading-tight tracking-[-0.01em] text-ink">{title}</h2>
@@ -353,8 +359,8 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
               <X className="size-4" />
             </IconButton>
           </div>
-          <div className="overflow-y-auto px-5 py-4">{children}</div>
-          {footer && <div className="flex justify-end gap-2 border-t border-line bg-canvas/60 px-5 py-3">{footer}</div>}
+          <div data-scroll className={cx('overflow-y-auto overscroll-contain px-5 py-4', !footer && 'pb-[max(1rem,env(safe-area-inset-bottom))]')}>{children}</div>
+          {footer && <div className="flex justify-end gap-2 border-t border-line bg-canvas/60 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:[&>button]:flex-1 sm:pb-3">{footer}</div>}
         </div>
       )}
     </dialog>
@@ -417,8 +423,8 @@ export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; on
 
 export function Table({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cx('overflow-x-auto rounded-lg border border-line bg-surface', className)}>
-      <table className="w-full border-collapse text-left text-[13px]">{children}</table>
+    <div data-scroll className={cx('overflow-x-auto overscroll-x-contain rounded-lg border border-line bg-surface', className)}>
+      <table className="w-full border-collapse text-left text-[13px] max-sm:min-w-[620px]">{children}</table>
     </div>
   )
 }
@@ -447,13 +453,10 @@ export function Spinner({ className }: { className?: string }) {
 }
 
 /** Visionary X mark: the moon orb with its small "X" badge, drawn in CSS (no external asset). */
+/** The official Visionary X orb (cut from the brand logo by scripts/make-icons.mjs). Never redrawn or recoloured. */
 export function BrandMark({ size = 28, className }: { size?: number; className?: string }) {
-  return (
-    <span className={cx('relative inline-block shrink-0', className)} style={{ width: size, height: size }} aria-hidden>
-      <span className="absolute inset-0 rounded-full" style={{ background: 'radial-gradient(circle at 34% 30%, #ffffff 0%, #e9e8e4 38%, #a9a8a4 72%, #5c5b58 100%)', boxShadow: '0 0 18px rgb(251 250 247 / 0.12)' }} />
-      <span className="absolute flex items-center justify-center rounded-full bg-canvas text-ink" style={{ width: size * 0.36, height: size * 0.36, right: size * 0.04, top: size * 0.08, fontSize: size * 0.2, fontWeight: 700, lineHeight: 1 }}>X</span>
-    </span>
-  )
+  const src = size <= 32 ? '/brand/vx-orb-64.png' : size <= 64 ? '/brand/vx-orb-128.png' : size <= 128 ? '/brand/vx-orb-256.png' : '/brand/vx-orb-512.png'
+  return <img src={src} width={size} height={size} alt="" aria-hidden draggable={false} className={cx('inline-block shrink-0 select-none', className)} style={{ width: size, height: size }} />
 }
 
 export function BrandLockup({ size = 28, sub }: { size?: number; sub?: string }) {

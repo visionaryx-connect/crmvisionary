@@ -12,6 +12,8 @@ import { DueText, PriorityMark, TaskStatusBadge } from '@/components/status'
 import { TaskDialog } from '@/components/TaskDialog'
 import { GuideLink, NextStep, Stepper, TASK_STEPS, taskGuidance } from '@/components/Workflow'
 import { UploadButton } from './project/Panels'
+import { TaskDiscussion, type DiscussionComment } from '@/components/TaskDiscussion'
+import { NotificationTimeline } from '@/components/notifications'
 import type { ProjectData } from './project/types'
 
 interface TaskDetailData {
@@ -20,7 +22,8 @@ interface TaskDetailData {
   subtasks: { id: string; title: string; done: boolean; done_by_name: string | null }[]
   dependsOn: { id: string; number: number; title: string; status: string }[]
   blocking: { id: string; number: number; title: string; status: string }[]
-  comments: { id: string; body: string; created_at: string; author_id: string; author_name: string; avatar_color: string | null }[]
+  comments: DiscussionComment[]
+  mentionable?: { id: string; name: string }[]
   timeEntries: { id: string; user_id: string; user_name: string; work_date: string; minutes: number; note: string }[]
   attachments: { id: string; file_name: string; size_bytes: number; created_at: string; uploaded_by_name: string | null }[]
   submissions: { id: string; submitted_by_name: string; note: string; qty: number | null; submitted_at: string; decision: string; decided_by_name: string | null; decided_at: string | null; decision_note: string }[]
@@ -44,7 +47,6 @@ export default function TaskDetail() {
   const [blockOpen, setBlockOpen] = useState(false)
   const [note, setNote] = useState('')
   const [qty, setQty] = useState('')
-  const [comment, setComment] = useState('')
   const [subtask, setSubtask] = useState('')
   const [time, setTime] = useState({ workDate: todayIST(), hours: '1', note: '' })
   const [histTab, setHistTab] = useState<'submissions' | 'status' | 'changes'>('submissions')
@@ -61,8 +63,6 @@ export default function TaskDetail() {
   const status = useAction((v: { status: TaskStatus; blockedReason?: string; note?: string }) => api.post(`/api/tasks/${id}/status`, v), { success: 'Status updated', invalidate: inv, onSuccess: () => { setBlockOpen(false); setNote('') } })
   const submit = useAction(() => api.post(`/api/tasks/${id}/submit`, { note, ...(q.data?.task.target_qty && qty ? { qty: Math.round(Number(qty)) } : {}) }), { success: 'Submitted for review — reviewers notified', invalidate: inv, onSuccess: () => { setSubmitOpen(false); setNote('') } })
   const review = useAction((decision: 'approved' | 'revision_requested') => api.post(`/api/tasks/${id}/review`, { decision, note, ...(decision === 'approved' && q.data?.task.target_qty && qty ? { qty: Math.round(Number(qty)) } : {}) }), { success: () => (reviewOpen === 'approved' ? 'Approved — progress updated' : 'Revisions requested'), invalidate: inv, onSuccess: () => { setReviewOpen(null); setNote('') } })
-  const addComment = useAction(() => api.post(`/api/tasks/${id}/comments`, { body: comment }), { invalidate: [['task', id]], onSuccess: () => setComment('') })
-  const delComment = useAction((cid: string) => api.del(`/api/tasks/${id}/comments/${cid}`), { invalidate: [['task', id]] })
   const addSub = useAction(() => api.post(`/api/tasks/${id}/subtasks`, { title: subtask }), { invalidate: [['task', id], ['tasks']], onSuccess: () => setSubtask('') })
   const toggleSub = useAction((v: { sid: string; done: boolean }) => api.patch(`/api/tasks/${id}/subtasks/${v.sid}`, { done: v.done }), { invalidate: [['task', id], ['tasks']] })
   const delSub = useAction((sid: string) => api.del(`/api/tasks/${id}/subtasks/${sid}`), { invalidate: [['task', id], ['tasks']] })
@@ -89,7 +89,7 @@ export default function TaskDetail() {
   return (
     <div>
       <PageHeader
-        eyebrow={<span className="flex items-center gap-2"><Link to={`/projects/${t.project_id}?tab=board`} className="hover:underline">{t.project_reference} · {t.project_name}</Link><span>/</span><span>#{t.number}</span></span>}
+        eyebrow={<span className="inline"><Link to={`/projects/${t.project_id}?tab=board`} className="hover:underline">{t.project_reference} · {t.project_name}</Link><span className="mx-1.5">/</span><span className="whitespace-nowrap">#{t.number}</span></span>}
         title={t.title}
         meta={<><TaskStatusBadge status={t.status} /><PriorityMark priority={t.priority} withLabel /><span>Due <DueText date={t.due_date} open={open} /></span>{t.requires_approval && <span className="inline-flex items-center gap-1"><ShieldAlert className="size-3.5" />Review required</span>}</>}
         actions={
@@ -177,27 +177,12 @@ export default function TaskDetail() {
             </Panel>
           </Section>
 
-          <Section title={`Discussion · ${d.comments.length}`} description="Internal only — never visible to clients.">
-            <div className="space-y-3">
-              {d.comments.map((c) => (
-                <div key={c.id} className="flex gap-3">
-                  <Avatar name={c.author_name} color={c.avatar_color} size={28} />
-                  <div className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3.5 py-2.5">
-                    <div className="flex items-center gap-2 text-[12px]"><span className="font-medium text-ink">{c.author_name}</span><span className="text-muted">{relative(c.created_at)}</span>{c.author_id === me.user.id && <button className="ml-auto text-faint hover:text-danger" aria-label="Delete comment" onClick={() => delComment.mutate(c.id)}><Trash2 className="size-3.5" /></button>}</div>
-                    <p className="mt-1 whitespace-pre-wrap text-[13.5px] text-ink-2">{c.body}</p>
-                  </div>
-                </div>
-              ))}
-              {a.canContribute && (
-                <form className="flex gap-3" onSubmit={(e) => { e.preventDefault(); if (comment.trim()) addComment.mutate() }}>
-                  <Avatar name={me.user.name} color={me.user.avatarColor} size={28} />
-                  <div className="flex-1 space-y-2">
-                    <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Write a comment…" aria-label="Comment" onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && comment.trim()) addComment.mutate() }} />
-                    <div className="flex justify-end"><Button size="sm" variant="primary" type="submit" loading={addComment.isPending} disabled={!comment.trim()}>Comment</Button></div>
-                  </div>
-                </form>
-              )}
-            </div>
+          <Section title={`Discussion · ${d.comments.length}`} description="Internal only — never visible to clients. Participants are notified; @mentioned people get a direct alert.">
+            <TaskDiscussion taskId={id} comments={d.comments} people={d.mentionable ?? []} canComment={a.canContribute} me={{ id: me.user.id, name: me.user.name, avatarColor: me.user.avatarColor }} />
+          </Section>
+
+          <Section title="Notifications sent" description="Who was told about this task, when, and how.">
+            <Panel><NotificationTimeline entityType="task" entityId={id} /></Panel>
           </Section>
 
           <Section title="History">

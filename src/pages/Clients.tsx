@@ -118,18 +118,38 @@ export default function Clients() {
         actions={can('clients.manage') && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setParams({ new: '1' })}>New client</Button>}
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative w-full max-w-xs">
+        <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-faint" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, reference" className="pl-8" aria-label="Search clients" />
         </div>
-        <Select value={status} onChange={(e) => setParams(e.target.value ? { status: e.target.value } : {})} className="w-40" aria-label="Filter by status">
+        <Select value={status} onChange={(e) => setParams(e.target.value ? { status: e.target.value } : {})} className="w-full sm:w-40" aria-label="Filter by status">
           <option value="">All current</option>
           {CLIENT_STATUSES.map((s) => <option key={s} value={s}>{CLIENT_STATUS_LABEL[s]}</option>)}
         </Select>
       </div>
       <QueryState q={list} empty={(d) => (d.length === 0 ? <EmptyState title={q ? 'No clients match your search' : 'No clients yet'} body={can('clients.manage') ? 'Add your first client to start tracking projects and communication.' : 'Clients you manage will appear here.'} action={can('clients.manage') && !q ? <Button variant="primary" onClick={() => setParams({ new: '1' })}>Add client</Button> : undefined} /> : null)}>
         {(rows) => (
-          <Table>
+          <>
+          <ul className="space-y-2 sm:hidden">
+            {rows.map((c) => (
+              <li key={c.id}>
+                <Link to={`/clients/${c.id}`} className="block rounded-lg border border-line bg-surface px-3.5 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 font-medium text-ink">{c.name}</span>
+                    <ClientStatusBadge status={c.status} />
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted"><span className="font-mono">{c.reference}</span>{c.industry && <span>· {c.industry}</span>}{c.is_seed && <SampleTag />}</div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-ink-2">
+                    <span>{c.account_manager_name ?? 'Unassigned'}</span>
+                    <span>{c.active_projects}/{c.total_projects} projects</span>
+                    {c.open_feedback > 0 && <span className="text-warn">{c.open_feedback} open feedback</span>}
+                    {c.next_deadline && <span>Next {fmtDateShort(c.next_deadline)}</span>}
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <Table className="hidden sm:block">
             <thead>
               <tr><Th>Client</Th><Th>Status</Th><Th>Account manager</Th><Th align="right">Active projects</Th><Th align="right">Open feedback</Th><Th>Next deadline</Th></tr>
             </thead>
@@ -149,6 +169,7 @@ export default function Clients() {
               ))}
             </tbody>
           </Table>
+          </>
         )}
       </QueryState>
       <ClientDialog open={creating} onClose={() => setParams({})} />

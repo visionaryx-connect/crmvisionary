@@ -34,7 +34,7 @@ Sample accounts are listed when the seed runs; they all use `@sample.visionary-x
 Other commands:
 
 ```bash
-npm test                 # 63 Worker-runtime tests (auth, RBAC, isolation, realtime, workflows, reports)
+npm test                 # 115 Worker-runtime tests (auth, RBAC, isolation, realtime, workflows, reports, notifications)
 npm run typecheck        # app + worker + config
 npm run build            # production bundle (dist/)
 scripts/backup.sh --local && scripts/restore-drill.sh "$(ls -t backups/*.sql | head -1)" --compare-local
@@ -50,6 +50,7 @@ scripts/backup.sh --local && scripts/restore-drill.sh "$(ls -t backups/*.sql | h
 - [docs/BACKUP_RECOVERY.md](docs/BACKUP_RECOVERY.md) — backups, point-in-time recovery, tested restore drill
 - [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — progress, health, review workflow, reporting periods, holidays, attendance
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — code layout, data model, realtime design
+- [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) — notification engine, Brevo email, Web Push, schedules, escalation, setup and verification
 
 ## What is implemented
 
@@ -62,6 +63,8 @@ scripts/backup.sh --local && scripts/restore-drill.sh "$(ls -t backups/*.sql | h
 **Tasks** — responsible + additional assignees, priority, dates, estimates, complexity weight, subtasks, dependencies (cycle-checked, block start/submit), internal comments, time logging, attachments, submission → approve / request-revision workflow with full history, self-approval prevention, blocked reasons, reassignment, bulk operations, change log.
 
 **Deliverables & files** — private R2 storage with random keys, type allow-list + magic-byte checks, 25 MB limit, authorised streaming downloads, version history, internal review → approval → explicit share to client → client approve/request changes, soft delete with 30-day retention purge.
+
+**Notifications** — one event engine for every module: ≈100 registered events, role-based routing, per-person channel preferences and quiet hours, Brevo transactional email with webhook delivery tracking and bounce suppression, Web Push (VAPID, multi-device, PWA), durable outbox with retries, attendance/deadline/digest/report schedules, overdue and acknowledgement escalation, announcements with acknowledgement, Super Admin notification center (analytics, delivery logs, rules, templates, schedules, devices, jobs, audit).
 
 **Realtime** — one Durable Object hub using the WebSocket Hibernation API; all 15 required event types plus portal-namespaced events; per-socket authorisation at subscribe and delivery time, session re-validation, revocation-driven disconnects, size and rate limits, client de-duplication and full refetch on reconnect.
 
@@ -77,7 +80,7 @@ scripts/backup.sh --local && scripts/restore-drill.sh "$(ls -t backups/*.sql | h
 
 - **Password hashing uses PBKDF2-SHA256 (100,000 iterations), not Argon2id.** Workers' WebCrypto has no Argon2, and a WASM Argon2id at recommended cost exceeds the free plan's CPU budget. The hash format is versioned for a later upgrade. See docs/SECURITY.md.
 - **CPU limits:** a sign-in (PBKDF2) and large reports can exceed the Workers **free** plan's 10 ms CPU per request. The **Workers Paid** plan (US$5/month) is recommended for production; everything else fits free-tier quotas at company scale.
-- **No email/WhatsApp delivery** is wired up. Notifications are in-app (and live). Password-reset requests notify administrators, who verify the person and issue a one-time link. Activation/reset links are shown to the administrator to send.
+- **Email (Brevo) and Web Push are built in but off until configured** (see docs/NOTIFICATIONS.md). Until the staging checklist there passes, treat them as unverified. WhatsApp/SMS are not implemented: the delivery outbox has a `channel` column, so they can be added as further channels later. Activation and reset links are still shown to the administrator to send.
 - **No malware scanning** of uploads (not available on Cloudflare's free tier). Mitigations: allow-list, magic-byte check, forced download, sandbox CSP, private storage.
 - **Holiday data must be verified each year.** The seed includes the 2026 Tamil Nadu list from G.O.(Ms) No. 708 (11 Nov 2025) as *pending verification* only; dates not confirmed in that notification (e.g. Deepavali, Vinayakar Chathurthi, Ayutha Pooja for 2026) were deliberately not seeded.
 - **Reminder minutes** on calendar events are stored and displayed but no push reminder is sent at that time (the daily cron sends deadline/overdue notices).

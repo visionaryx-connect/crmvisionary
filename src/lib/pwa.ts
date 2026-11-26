@@ -29,6 +29,28 @@ export const isStandalone = () =>
 export const isIos = () =>
   /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
+/**
+ * iOS home-screen apps run under the status bar (black-translucent), and iOS can report the viewport (100dvh /
+ * innerHeight) shorter than the physical screen. Anything sized or pinned to that viewport then stops short and
+ * leaves a dead strip at the bottom. In that mode we size the app to the physical screen instead
+ * (--app-height) and stop the document itself from scrolling (html.ios-app).
+ */
+export function lockIosAppHeight() {
+  if (!isIos() || !isStandalone()) return
+  const root = document.documentElement
+  root.classList.add('ios-app')
+  const apply = () => {
+    const portrait = window.matchMedia('(orientation: portrait)').matches
+    const screenH = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height)
+    root.style.setProperty('--app-height', `${Math.max(window.innerHeight, screenH)}px`)
+  }
+  apply()
+  window.addEventListener('resize', apply)
+  window.addEventListener('orientationchange', () => setTimeout(apply, 250))
+  // Returning from the background is when iOS most often mis-reports the height.
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && apply())
+}
+
 export function usePwaInstall() {
   const [, force] = useState(0)
   useEffect(() => {

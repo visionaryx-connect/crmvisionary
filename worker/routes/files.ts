@@ -7,7 +7,8 @@ import { newId, randomToken, sha256Bytes } from '../lib/crypto'
 import { many, nowIso, one } from '../lib/db'
 import { ApiError, body, clientIp, conflict, forbidden, notFound, query } from '../lib/http'
 import { requireStaff } from '../lib/session'
-import { notify } from '../services/notify'
+import { deliverableNotice } from '../services/moduleNotifications'
+import { taskAttachmentAdded } from '../services/taskNotifications'
 import { publish, rooms } from '../services/realtime'
 
 const files = new Hono<AppBindings>()
@@ -105,6 +106,7 @@ files.post('/upload', async (c) => {
     throw err
   }
   publish(c.env, c.executionCtx, [{ type: 'project.updated', room: rooms.project(projectId), data: { projectId, fields: ['files'] } }])
+  if (taskId && !deliverable) await taskAttachmentAdded(c.env, c.executionCtx, taskId, { userId: a.userId, name: a.name }, name)
   return c.json({ id, version, contentType: mime, size: file.size }, 201)
 })
 
@@ -266,9 +268,12 @@ files.post('/deliverables/:id/status', async (c) => {
   await c.env.DB.batch(stmts)
   if (action === 'submit_review') {
     const reviewers = await many<{ user_id: string }>(c.env.DB, `SELECT user_id FROM project_members WHERE project_id = ? AND (can_review = 1 OR role = 'manager')`, d.project_id)
-    await notify(c.env, c.executionCtx, reviewers.map((r) => ({ userId: r.user_id, kind: 'review_requested' as const, title: `Deliverable ready for review: ${d.title}`, body: access.project.reference, link: `/projects/${d.project_id}?tab=deliverables` })), a.userId)
+    await deliverableNotice(c.env, c.executionCtx, d.id, { userId: a.userId, name: a.name }, 'submitted', reviewers.map((r) => r.user_id), note)
   } else if (action === 'approve' || action === 'return_draft') {
-    await notify(c.env, c.executionCtx, [{ userId: d.created_by, kind: action === 'approve' ? 'task_approved' : 'revision_requested', title: `${action === 'approve' ? 'Approved' : 'Returned to draft'}: ${d.title}`, body: note, link: `/projects/${d.project_id}?tab=deliverables` }], a.userId)
+    await deliverableNotice(c.env, c.executionCtx, d.id, { userId: a.userId, name: a.name }, action === 'approve' ? 'approved' : 'returned', [d.created_by], note)
+  } else if (to === 'shared') {
+    const team = await many<{ user_id: string }>(c.env.DB, `SELECT user_id FROM project_members WHERE project_id = ? AND role <> 'viewer'`, d.project_id)
+    await deliverableNotice(c.env, c.executionCtx, d.id, { userId: a.userId, name: a.name }, 'shared', team.map((r) => r.user_id))
   }
   publish(c.env, c.executionCtx, [
     { type: 'project.updated', room: rooms.project(d.project_id), data: { projectId: d.project_id, fields: ['deliverables'] } },

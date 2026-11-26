@@ -9,6 +9,7 @@ import { newId } from '../lib/crypto'
 import { diff, many, nowIso, one, patchColumns } from '../lib/db'
 import { ApiError, body, clientIp, conflict, forbidden, notFound } from '../lib/http'
 import { can, requirePermission, requireStaff } from '../lib/session'
+import { employeeChanged } from '../services/moduleNotifications'
 
 const team = new Hono<AppBindings>()
 team.use('*', requireStaff())
@@ -119,6 +120,11 @@ team.patch('/members/:id', async (c) => {
   const changed = Object.keys(diff(before, Object.fromEntries(sets.map((s, i) => [s.split(' = ')[0], values[i]]))))
   stmts.push(activity(c.env.DB, { category: 'admin', actorId: a.userId, action: 'employee.updated', entityType: 'user', entityId: id, summary: `Updated employee profile`, changes: { fields: changed.concat(input.skills ? ['skills'] : [], input.name ? ['name'] : []) }, ip: clientIp(c) }))
   await c.env.DB.batch(stmts)
+  if (a.userId !== id) {
+    // Notify the employee of HR edits. Values are passed only for org fields; sensitive fields are reported as "profile updated".
+    const full = diff(before, Object.fromEntries(sets.map((s, i) => [s.split(' = ')[0], values[i]])))
+    await employeeChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, full)
+  }
   return c.json({ ok: true })
 })
 

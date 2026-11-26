@@ -36,7 +36,7 @@ function TodayPanel() {
         <div className="eyebrow">Today · {fmtWeekday(todayIST())}</div>
         <p className="mt-1 text-[13.5px] text-ink-2">{q.data && !q.data.day.working ? `Non-working day${q.data.day.label ? ` — ${q.data.day.label}` : ''}` : r?.check_in_at ? <>In at <span className="font-medium text-ink">{fmtTime(r.check_in_at)}</span>{r.check_out_at && <> · out at <span className="font-medium text-ink">{fmtTime(r.check_out_at)}</span></>}{r.status === 'remote' && <Badge tone="accent" className="ml-2">Remote</Badge>}</> : 'Not checked in yet'}</p>
       </div>
-      <div className="ml-auto flex gap-2">
+      <div className="flex w-full gap-2 sm:ml-auto sm:w-auto [&>button]:flex-1 sm:[&>button]:flex-none">
         {!r?.check_in_at && <><Button icon={<LogIn className="size-4" />} variant="primary" loading={checkIn.isPending} onClick={() => checkIn.mutate(false)}>Check in</Button><Button onClick={() => checkIn.mutate(true)}>Working remotely</Button></>}
         {r?.check_in_at && !r.check_out_at && <Button icon={<LogOut className="size-4" />} loading={checkOut.isPending} onClick={() => checkOut.mutate()}>Check out</Button>}
       </div>
@@ -125,14 +125,14 @@ export default function Attendance() {
         <>
           <div className="mb-6"><TodayPanel /></div>
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-44" aria-label="Month" />
+            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full sm:w-44" aria-label="Month" />
             {q.data?.canManage && (
               <>
-                <Select className="w-44" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} aria-label="Department"><option value="">All departments</option>{departments.data?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</Select>
-                <Select className="w-44" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Person"><option value="">Everyone</option>{members.data?.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select>
+                <Select className="w-full sm:w-44" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} aria-label="Department"><option value="">All departments</option>{departments.data?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</Select>
+                <Select className="w-full sm:w-44" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Person"><option value="">Everyone</option>{members.data?.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select>
               </>
             )}
-            {q.data && <Button className="ml-auto" icon={<Download className="size-4" />} onClick={() => exportCsv(q.data!)}>Export CSV</Button>}
+            {q.data && <Button className="w-full sm:ml-auto sm:w-auto" icon={<Download className="size-4" />} onClick={() => exportCsv(q.data!)}>Export CSV</Button>}
           </div>
           <QueryState q={q} empty={(d) => (d.people.length === 0 ? <EmptyState title="No one to show" /> : null)}>
             {(s) => (

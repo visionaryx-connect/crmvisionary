@@ -10,6 +10,7 @@ import { ApiError, body, clientIp, conflict, forbidden, notFound, query } from '
 import { requirePermission, requireStaff, revokeUserSessions } from '../lib/session'
 import { getAllSettings, putSetting, SETTING_SCHEMAS, type SettingKey } from '../services/settings'
 import { disconnect } from '../services/realtime'
+import { accountStatusChanged, employeeCreated, notifySuperAdmins, securityNotice } from '../services/moduleNotifications'
 
 const admin = new Hono<AppBindings>()
 admin.use('*', requireStaff())
@@ -95,6 +96,10 @@ admin.post('/users', requirePermission('users.manage'), async (c) => {
     activity(c.env.DB, { category: 'admin', actorId: a.userId, action: 'user.created', entityType: 'user', entityId: id, summary: `Invited ${input.name} (${input.email}) as ${input.roleKeys.join(', ')}`, ip: clientIp(c) }),
   ])
   const token = await issueToken(c.env.DB, id, 'activation', a.userId, 72)
+  await employeeCreated(c.env, c.executionCtx, id, { userId: a.userId, name: a.name })
+  if (input.roleKeys.some((k) => k === 'admin' || k === 'super_admin')) {
+    await notifySuperAdmins(c.env, c.executionCtx, { userId: a.userId, name: a.name }, 'SECURITY_ADMIN_ADDED', `Administrator invited: ${input.name}`, `${a.name} invited ${input.email} with role(s) ${input.roleKeys.join(', ')}.`, `/admin/users?focus=${id}`)
+  }
   return c.json({ id, activationLink: linkFor(new URL(c.req.url).origin, token, 'activation'), expiresInHours: 72 }, 201)
 })
 
@@ -120,6 +125,9 @@ admin.put('/users/:id/roles', requirePermission('users.manage'), async (c) => {
   ])
   // Force re-authentication so new privileges (and any MFA requirement) apply immediately.
   await revokeUserSessions(c.env, userId, 'roles_changed')
+  await securityNotice(c.env, c.executionCtx, userId, 'SECURITY_ROLE_CHANGED', 'Your roles were changed', `${a.name} changed your roles to: ${roleKeys.join(', ')}. Sign in again to continue with your new permissions.`, [['Previous roles', current.map((r) => r.key).join(', ') || 'none'], ['New roles', roleKeys.join(', ')]])
+  const gained = roleKeys.filter((k) => (k === 'admin' || k === 'super_admin') && !current.some((r) => r.key === k))
+  if (gained.length) await notifySuperAdmins(c.env, c.executionCtx, { userId: a.userId, name: a.name }, 'SECURITY_ADMIN_ADDED', `${target.name} is now ${gained.join(' and ')}`, `Granted by ${a.name}.`, `/admin/users?focus=${userId}`)
   disconnect(c.env, c.executionCtx, { userId })
   return c.json({ ok: true })
 })
@@ -145,6 +153,7 @@ admin.post('/users/:id/status', requirePermission('users.manage'), async (c) => 
     await revokeUserSessions(c.env, userId, 'deactivated')
     disconnect(c.env, c.executionCtx, { userId })
   }
+  await accountStatusChanged(c.env, c.executionCtx, userId, { userId: a.userId, name: a.name }, status)
   return c.json({ ok: true })
 })
 
@@ -173,6 +182,7 @@ admin.post('/users/:id/reset-mfa', requirePermission('security.manage'), async (
   ])
   await revokeUserSessions(c.env, userId, 'mfa_reset')
   disconnect(c.env, c.executionCtx, { userId })
+  await securityNotice(c.env, c.executionCtx, userId, 'SECURITY_MFA_CHANGED', 'Two-factor authentication was reset', `${a.name} reset two-factor authentication on your account. Set it up again from Account.`)
   return c.json({ ok: true })
 })
 
@@ -238,7 +248,10 @@ admin.post('/roles', requirePermission('roles.manage'), async (c) => {
 })
 
 admin.put('/roles/:id', requirePermission('roles.manage'), async (c) => {
-  await writeRole(c, c.get('auth'), c.req.param('id'), await body(c, roleSchema), clientIp(c))
+  const input = await body(c, roleSchema)
+  await writeRole(c, c.get('auth'), c.req.param('id'), input, clientIp(c))
+  const a = c.get('auth')
+  await notifySuperAdmins(c.env, c.executionCtx, { userId: a.userId, name: a.name }, 'SECURITY_ROLE_PERMISSIONS_CHANGED', `Role permissions changed: ${input.name}`, `By ${a.name}`, '/admin/users?tab=roles')
   return c.json({ ok: true })
 })
 
@@ -326,6 +339,7 @@ admin.put('/settings/:key', requirePermission('settings.manage'), async (c) => {
   const value = await body(c, schema as z.ZodType<unknown>)
   await putSetting(c.env.DB, key, value, a.userId)
   await activity(c.env.DB, { category: 'admin', actorId: a.userId, action: 'settings.updated', entityType: 'setting', entityId: key, summary: `Updated setting ${key}`, changes: value, ip: clientIp(c) }).run()
+  await notifySuperAdmins(c.env, c.executionCtx, { userId: a.userId, name: a.name }, 'SECURITY_SETTINGS_CHANGED', `Company setting changed: ${key}`, `By ${a.name}`, '/settings', `settings:${key}:${nowIso().slice(0, 13)}`)
   return c.json({ ok: true })
 })
 

@@ -5,7 +5,7 @@
 //  * on the 1st of the month: frozen report snapshots for the previous month
 
 import type { Env } from '../env'
-import { addDays, localDate, monthBounds, previousMonth } from '@shared/dates'
+import { addDays, diffDays, localDate, monthBounds, previousMonth } from '@shared/dates'
 import { activity } from '../lib/audit'
 import { newId } from '../lib/crypto'
 import { many, nowIso } from '../lib/db'
@@ -17,6 +17,15 @@ import { companyReport, projectReport } from './reports'
 import { getSetting } from './settings'
 
 export const FILE_RETENTION_DAYS = 30
+
+/** Dispatch by cron expression: the 5-minute tick runs the notification scheduler, the daily one the jobs below. */
+export async function runCron(env: Env, waiter: Waiter, cron: string, at: Date) {
+  if (cron === '*/5 * * * *') {
+    const { runNotificationTick } = await import('./notificationSchedule')
+    return runNotificationTick(env, waiter, at)
+  }
+  return runScheduled(env, waiter, at)
+}
 
 export async function runScheduled(env: Env, waiter: Waiter, at: Date) {
   const today = localDate(at)
@@ -40,17 +49,34 @@ export async function deadlineReminders(env: Env, waiter: Waiter, today: string)
       WHERE t.due_date < ? AND t.responsible_id IS NOT NULL AND t.status IN ('backlog','todo','in_progress','blocked') AND p.archived_at IS NULL`,
     today,
   )
-  await notify(env, waiter, dueSoon.map((t) => ({ userId: t.responsible_id, kind: 'task_due_soon' as const, title: `Due tomorrow: ${t.reference}-${t.number} ${t.title}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, dedupeKey: `due:${t.id}:${tomorrow}` })))
+  const { tasks: taskSched } = await getSetting(env.DB, 'notifications.schedule')
+  const { maxOverdueReminders } = await getSetting(env.DB, 'notifications.escalation')
+  if (taskSched.remind24h) {
+    await notify(env, waiter, dueSoon.map((t) => ({
+      userId: t.responsible_id, event: 'TASK_DEADLINE_TOMORROW' as const, title: `Due tomorrow: ${t.reference}-${t.number} ${t.title}`, link: `/tasks/${t.id}`,
+      entityType: 'task', entityId: t.id, dedupeKey: `due:${t.id}:${tomorrow}`,
+      email: { details: [['Task', `#${t.number} ${t.title}`], ['Project', t.reference], ['Due', tomorrow]] },
+    })))
+  }
   await notify(
     env,
     waiter,
-    overdue.flatMap((t) => [
-      { userId: t.responsible_id, kind: 'task_overdue' as const, title: `Overdue since ${t.due_date}: ${t.reference}-${t.number} ${t.title}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, dedupeKey: `overdue:${t.id}:${today}` },
-      // Managers get one notice per overdue task per week, not daily.
-      ...(t.manager_id && t.manager_id !== t.responsible_id
-        ? [{ userId: t.manager_id, kind: 'task_overdue' as const, title: `Overdue: ${t.reference}-${t.number} ${t.title}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, dedupeKey: `overdue-mgr:${t.id}:${weekKey(today)}` }]
-        : []),
-    ]),
+    overdue.flatMap((t) => {
+      const days = diffDays(t.due_date, today)
+      return [
+        // The owner hears every day up to the configured maximum; escalation takes over after that.
+        ...(days <= maxOverdueReminders
+          ? [{
+              userId: t.responsible_id, event: 'TASK_OVERDUE' as const, title: `Overdue since ${t.due_date}: ${t.reference}-${t.number} ${t.title}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id,
+              dedupeKey: `overdue:${t.id}:${today}`, email: { intro: `This task is ${days} day(s) past its due date.`, details: [['Task', `#${t.number} ${t.title}`], ['Project', t.reference], ['Due', t.due_date]] as [string, string][] },
+            }]
+          : []),
+        // Managers get one notice per overdue task per week, not daily.
+        ...(t.manager_id && t.manager_id !== t.responsible_id
+          ? [{ userId: t.manager_id, event: 'TASK_OVERDUE' as const, title: `Overdue: ${t.reference}-${t.number} ${t.title}`, link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, dedupeKey: `overdue-mgr:${t.id}:${weekKey(today)}` }]
+          : []),
+      ]
+    }),
   )
   return { dueSoon: dueSoon.length, overdue: overdue.length }
 }

@@ -230,7 +230,13 @@ export const taskBulkSchema = z.object({
   dueDate: optDate,
 })
 export const subtaskSchema = z.object({ title: req(200, 'Title') })
-export const commentSchema = z.object({ body: req(5000, 'Comment') })
+export const commentSchema = z.object({
+  body: req(5000, 'Comment'),
+  /** Reply to this comment (one level of threading). */
+  parentId: z.string().max(40).nullable().optional(),
+  /** @mentioned user ids, chosen from the project team in the composer. */
+  mentions: z.array(z.string().max(40)).max(20).default([]),
+})
 export const timeEntrySchema = z.object({
   workDate: dateStr,
   minutes: z.number().int().min(1, 'Log at least 1 minute').max(1440),

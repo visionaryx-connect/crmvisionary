@@ -10,6 +10,8 @@ import { activity } from '../lib/audit'
 import { newId } from '../lib/crypto'
 import { many, nowIso, one, placeholders } from '../lib/db'
 import { notify, projectReviewers } from './notify'
+import { milestoneChanged } from './moduleNotifications'
+import { projectManagers } from './notificationRouting'
 import { publish, rooms, type Waiter } from './realtime'
 import { getSetting } from './settings'
 
@@ -86,10 +88,7 @@ export async function runProjectAutomations(env: Env, waiter: Waiter, projectId:
         { type: 'project.milestone_updated', room: rooms.project(projectId), data: { projectId, milestoneId: m.id, status: to } },
         ...(m.client_visible ? [{ type: 'portal.project_updated' as const, room: rooms.portalProject(projectId), data: { projectId } }] : []),
       ])
-      if (to === 'achieved') {
-        const members = await many<{ user_id: string }>(env.DB, 'SELECT user_id FROM project_members WHERE project_id = ?', projectId)
-        await notify(env, waiter, members.map((x) => ({ userId: x.user_id, kind: 'milestone_updated' as const, title: `Milestone achieved: ${m.title}`, body: `${project.reference} · all tasks approved`, link: `/projects/${projectId}?tab=milestones`, dedupeKey: `ms-achieved:${m.id}:${now.slice(0, 10)}` })))
-      }
+      if (to === 'achieved') await milestoneChanged(env, waiter, projectId, null, { id: m.id, title: m.title, status: 'achieved' })
     }
   }
 
@@ -117,7 +116,7 @@ export async function runProjectAutomations(env: Env, waiter: Waiter, projectId:
           actions.push('task_ready')
         }
         if (t.responsible_id) {
-          await notify(env, waiter, [{ userId: t.responsible_id, kind: 'task_assigned', title: `Ready to start: #${t.number} ${t.title}`, body: 'Everything it depends on is complete.', link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, dedupeKey: `ready:${t.id}` }])
+          await notify(env, waiter, [{ userId: t.responsible_id, event: 'TASK_READY', title: `Ready to start: #${t.number} ${t.title}`, body: 'Everything it depends on is complete.', link: `/tasks/${t.id}`, entityType: 'task', entityId: t.id, dedupeKey: `ready:${t.id}` }])
         }
       }
     }
@@ -130,7 +129,7 @@ export async function runProjectAutomations(env: Env, waiter: Waiter, projectId:
       await setProjectStatus(env, projectId, project.status, 'in_review', 'every task is complete')
       actions.push('project_in_review')
       const reviewers = await projectReviewers(env.DB, projectId)
-      await notify(env, waiter, reviewers.map((u) => ({ userId: u, kind: 'review_requested' as const, title: `All tasks done: ${project.reference} ${project.name}`, body: 'Approve the remaining deliverables, then close the project.', link: `/projects/${projectId}`, dedupeKey: `proj-review:${projectId}:${nowIso().slice(0, 10)}` })))
+      await notify(env, waiter, reviewers.map((u) => ({ userId: u, event: 'PROJECT_READY_FOR_REVIEW' as const, title: `All tasks done: ${project.reference} ${project.name}`, body: 'Approve the remaining deliverables, then close the project.', link: `/projects/${projectId}`, dedupeKey: `proj-review:${projectId}:${nowIso().slice(0, 10)}` })))
     } else if (!allDone && project.status === 'in_review') {
       // Only undo a review state that the automation itself set.
       const last = await one<{ note: string; changed_by: string | null }>(env.DB, 'SELECT note, changed_by FROM project_status_history WHERE project_id = ? ORDER BY changed_at DESC LIMIT 1', projectId)
@@ -178,7 +177,8 @@ export async function markDelayedProjects(env: Env, waiter: Waiter, today: strin
   )
   for (const p of late) {
     await setProjectStatus(env, p.id, p.status, 'delayed', `target date ${p.target_date} has passed`)
-    if (p.manager_id) await notify(env, waiter, [{ userId: p.manager_id, kind: 'task_overdue', title: `Project delayed: ${p.reference} ${p.name}`, body: `Target date ${p.target_date} has passed. Update the plan or the target date.`, link: `/projects/${p.id}`, dedupeKey: `proj-delayed:${p.id}` }])
+    const pms = await projectManagers(env.DB, p.id)
+    await notify(env, waiter, pms.map((u) => ({ userId: u, event: 'PROJECT_DELAYED' as const, title: `Project delayed: ${p.reference} ${p.name}`, body: `Target date ${p.target_date} has passed. Update the plan or the target date.`, link: `/projects/${p.id}`, entityType: 'project', entityId: p.id, projectId: p.id, dedupeKey: `proj-delayed:${p.id}:${p.target_date}`, email: { intro: `The target date ${p.target_date} has passed and the project is still running.`, details: [['Project', `${p.name} (${p.reference})`], ['Target date', p.target_date]] } })))
     publish(env, waiter, [{ type: 'project.updated', room: rooms.project(p.id), data: { projectId: p.id, fields: ['status'] } }])
   }
   return late.length

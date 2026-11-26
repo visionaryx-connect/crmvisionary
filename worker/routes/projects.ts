@@ -11,7 +11,7 @@ import { diff, many, nowIso, one, patchColumns, placeholders } from '../lib/db'
 import { ApiError, body, clientIp, conflict, forbidden, notFound, query } from '../lib/http'
 import { requirePermission, requireStaff } from '../lib/session'
 import { recalcProgress } from '../services/progress'
-import { notify } from '../services/notify'
+import { milestoneChanged, projectAssigned, projectChanged, projectMemberChanged, projectUpdatePosted, projectUpdatePublished } from '../services/moduleNotifications'
 import { invalidateMembership, publish, rooms } from '../services/realtime'
 
 const projects = new Hono<AppBindings>()
@@ -111,6 +111,7 @@ projects.post('/', requirePermission('projects.create'), async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'project.created', entityType: 'project', entityId: id, projectId: id, summary: `Created project ${reference} · ${input.name} for ${client.name}`, ip: clientIp(c) }),
   ])
   invalidateMembership(c.env, c.executionCtx, [managerId])
+  await projectAssigned(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, managerId)
   publish(c.env, c.executionCtx, [{ type: 'project.updated', room: rooms.project(id), data: { projectId: id, created: true } }])
   return c.json({ id, reference }, 201)
 })
@@ -232,6 +233,7 @@ projects.patch('/:id', async (c) => {
   await c.env.DB.batch(stmts)
   if (input.progressMode && input.progressMode !== before.progress_mode) await recalcProgress(c.env, c.executionCtx, id)
   if (input.managerId) invalidateMembership(c.env, c.executionCtx, [input.managerId, String(before.manager_id ?? '')].filter(Boolean))
+  await projectChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, Object.fromEntries(Object.entries(changes).filter(([k]) => ['status', 'target_date', 'manager_id'].includes(k))))
   publish(c.env, c.executionCtx, [
     { type: 'project.updated', room: rooms.project(id), data: { projectId: id, fields: Object.keys(changes) } },
     ...(input.clientStatusNote !== undefined || input.status ? [{ type: 'portal.project_updated' as const, room: rooms.portalProject(id), data: { projectId: id } }] : []),
@@ -298,7 +300,8 @@ projects.post('/:id/members', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'project.member_added', entityType: 'project', entityId: id, projectId: id, summary: `Added ${user.name} as ${input.role}`, ip: clientIp(c) }),
   ])
   invalidateMembership(c.env, c.executionCtx, [input.userId])
-  await notify(c.env, c.executionCtx, [{ userId: input.userId, kind: 'task_assigned', title: `You were added to ${access.project.name}`, body: `Role: ${input.role}${input.responsibility ? ` · ${input.responsibility}` : ''}`, link: `/projects/${id}`, entityType: 'project', entityId: id }], a.userId)
+  void access
+  await projectMemberChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, input.userId, true, input.role, input.responsibility)
   publish(c.env, c.executionCtx, [{ type: 'project.updated', room: rooms.project(id), data: { projectId: id, fields: ['members'] } }])
   return c.json({ ok: true })
 })
@@ -317,6 +320,7 @@ projects.delete('/:id/members/:userId', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'project.member_removed', entityType: 'project', entityId: id, projectId: id, summary: `Removed ${user?.name ?? 'member'} from the project`, ip: clientIp(c) }),
   ])
   invalidateMembership(c.env, c.executionCtx, [userId])
+  await projectMemberChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, userId, false)
   publish(c.env, c.executionCtx, [{ type: 'project.updated', room: rooms.project(id), data: { projectId: id, fields: ['members'] } }])
   return c.json({ ok: true })
 })
@@ -359,6 +363,7 @@ projects.post('/:id/milestones', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'milestone.created', entityType: 'milestone', entityId: mid, projectId: id, summary: `Added milestone "${input.title}"`, ip: clientIp(c) }),
   ])
   await recalcProgress(c.env, c.executionCtx, id)
+  await milestoneChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, { id: mid, title: input.title, status: input.status, created: true, due: input.dueDate ?? null })
   publish(c.env, c.executionCtx, [{ type: 'project.milestone_updated', room: rooms.project(id), data: { projectId: id, milestoneId: mid } }])
   return c.json({ id: mid }, 201)
 })
@@ -392,9 +397,9 @@ projects.put('/:id/milestones/:mid', async (c) => {
     { type: 'project.milestone_updated', room: rooms.project(id), data: { projectId: id, milestoneId: mid, status: input.status } },
     ...(input.clientVisible ? [{ type: 'portal.project_updated' as const, room: rooms.portalProject(id), data: { projectId: id } }] : []),
   ])
-  if (input.status !== before.status && (input.status === 'achieved' || input.status === 'missed')) {
-    const members = await many<{ user_id: string }>(c.env.DB, 'SELECT user_id FROM project_members WHERE project_id = ?', id)
-    await notify(c.env, c.executionCtx, members.map((m) => ({ userId: m.user_id, kind: 'milestone_updated' as const, title: `Milestone ${input.status}: ${input.title}`, body: access.project.name, link: `/projects/${id}?tab=milestones`, entityType: 'milestone', entityId: mid })), a.userId)
+  void access
+  if (input.status !== before.status) {
+    await milestoneChanged(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, { id: mid, title: input.title, status: input.status, due: input.dueDate ?? null })
   }
   return c.json({ ok: true })
 })
@@ -470,6 +475,7 @@ projects.post('/:id/updates', async (c) => {
     { type: 'project.updated', room: rooms.project(id), data: { projectId: id, fields: ['updates'] } },
     ...(input.clientVisible ? [{ type: 'portal.project_updated' as const, room: rooms.portalProject(id), data: { projectId: id } }] : []),
   ])
+  await projectUpdatePosted(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, { id: uid, title: input.title, body: input.body, clientVisible: input.clientVisible })
   return c.json({ id: uid }, 201)
 })
 
@@ -485,6 +491,7 @@ projects.post('/:id/updates/:uid/publish', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: visible ? 'project.update_published' : 'project.update_unpublished', entityType: 'project', entityId: id, projectId: id, summary: `${visible ? 'Shared' : 'Withdrew'} update "${u.title}" ${visible ? 'with' : 'from'} the client`, ip: clientIp(c) }),
   ])
   publish(c.env, c.executionCtx, [{ type: 'portal.project_updated', room: rooms.portalProject(id), data: { projectId: id } }])
+  if (visible && !u.client_visible) await projectUpdatePublished(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, u.title)
   return c.json({ ok: true })
 })
 

@@ -11,7 +11,7 @@ import { newId } from '../lib/crypto'
 import { many, nowIso, one, placeholders } from '../lib/db'
 import { ApiError, body, clientIp, forbidden, notFound, query } from '../lib/http'
 import { can, requirePermission, requireStaff } from '../lib/session'
-import { notify } from '../services/notify'
+import { meetingNotice } from '../services/moduleNotifications'
 import { publish, rooms } from '../services/realtime'
 import { getDayOffSource, getWorkweek } from '../services/settings'
 
@@ -238,7 +238,7 @@ calendar.post('/events', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'calendar.event_created', entityType: 'calendar_event', entityId: id, projectId: input.projectId ?? null, summary: `Scheduled “${input.title}”`, ip: clientIp(c) }),
   ])
   const conflicts = await attendeeConflicts(c.env.DB, attendees, startAt, endAt, id)
-  await notify(c.env, c.executionCtx, attendees.map((u) => ({ userId: u, kind: 'calendar_changed' as const, title: `Invitation: ${input.title}`, body: `${new Date(startAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}`, link: `/calendar?event=${id}` })), a.userId)
+  await meetingNotice(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, 'invited', attendees, { title: input.title, startAt, location: input.location })
   publish(c.env, c.executionCtx, [{ type: 'calendar.event_created', room: input.projectId ? rooms.project(input.projectId) : rooms.company(), data: { eventId: id } }])
   return c.json({ id, conflicts }, 201)
 })
@@ -246,7 +246,7 @@ calendar.post('/events', async (c) => {
 calendar.put('/events/:id', async (c) => {
   const a = c.get('auth')
   const id = c.req.param('id')
-  const ev = await one<{ organizer_id: string | null; title: string; start_at: string }>(c.env.DB, 'SELECT organizer_id, title, start_at FROM calendar_events WHERE id = ? AND cancelled_at IS NULL', id)
+  const ev = await one<{ organizer_id: string | null; title: string; start_at: string; end_at: string; location: string | null }>(c.env.DB, 'SELECT organizer_id, title, start_at, end_at, location FROM calendar_events WHERE id = ? AND cancelled_at IS NULL', id)
   if (!ev) throw notFound('Event')
   if (ev.organizer_id !== a.userId && !can(a, 'calendar.manage')) throw forbidden('Only the organiser can edit this event')
   const input = await body(c, eventSchema)
@@ -264,7 +264,13 @@ calendar.put('/events/:id', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'calendar.event_updated', entityType: 'calendar_event', entityId: id, projectId: input.projectId ?? null, summary: `Updated “${input.title}”${ev.start_at !== startAt ? ' (time changed)' : ''}`, ip: clientIp(c) }),
   ])
   const conflicts = await attendeeConflicts(c.env.DB, attendees, startAt, endAt, id)
-  await notify(c.env, c.executionCtx, attendees.map((u) => ({ userId: u, kind: 'calendar_changed' as const, title: `Updated: ${input.title}`, link: `/calendar?event=${id}` })), a.userId)
+  const actor = { userId: a.userId, name: a.name }
+  const before = new Set(prev.map((p) => p.user_id))
+  const changed = [ev.start_at !== startAt || ev.end_at !== endAt ? 'time' : '', (ev.location ?? '') !== (input.location ?? '') ? 'location' : '', ev.title !== input.title ? 'title' : ''].filter(Boolean)
+  const info = { title: input.title, startAt, location: input.location, changed }
+  await meetingNotice(c.env, c.executionCtx, id, actor, 'invited', attendees.filter((u) => !before.has(u)), info)
+  if (changed.length) await meetingNotice(c.env, c.executionCtx, id, actor, 'updated', attendees.filter((u) => before.has(u)), info)
+  await meetingNotice(c.env, c.executionCtx, id, actor, 'removed', [...before].filter((u) => !attendees.includes(u)), info)
   publish(c.env, c.executionCtx, [{ type: 'calendar.event_updated', room: input.projectId ? rooms.project(input.projectId) : rooms.company(), data: { eventId: id } }])
   return c.json({ ok: true, conflicts })
 })
@@ -281,7 +287,7 @@ calendar.post('/events/:id/respond', async (c) => {
 calendar.delete('/events/:id', async (c) => {
   const a = c.get('auth')
   const id = c.req.param('id')
-  const ev = await one<{ organizer_id: string | null; title: string; project_id: string | null }>(c.env.DB, 'SELECT organizer_id, title, project_id FROM calendar_events WHERE id = ? AND cancelled_at IS NULL', id)
+  const ev = await one<{ organizer_id: string | null; title: string; project_id: string | null; start_at: string; location: string | null }>(c.env.DB, 'SELECT organizer_id, title, project_id, start_at, location FROM calendar_events WHERE id = ? AND cancelled_at IS NULL', id)
   if (!ev) throw notFound('Event')
   if (ev.organizer_id !== a.userId && !can(a, 'calendar.manage')) throw forbidden('Only the organiser can cancel this event')
   await c.env.DB.batch([
@@ -289,7 +295,7 @@ calendar.delete('/events/:id', async (c) => {
     activity(c.env.DB, { actorId: a.userId, action: 'calendar.event_cancelled', entityType: 'calendar_event', entityId: id, projectId: ev.project_id, summary: `Cancelled “${ev.title}”`, ip: clientIp(c) }),
   ])
   const attendees = await many<{ user_id: string }>(c.env.DB, 'SELECT user_id FROM event_attendees WHERE event_id = ?', id)
-  await notify(c.env, c.executionCtx, attendees.map((x) => ({ userId: x.user_id, kind: 'calendar_changed' as const, title: `Cancelled: ${ev.title}` })), a.userId)
+  await meetingNotice(c.env, c.executionCtx, id, { userId: a.userId, name: a.name }, 'cancelled', attendees.map((x) => x.user_id), { title: ev.title, startAt: ev.start_at, location: ev.location })
   publish(c.env, c.executionCtx, [{ type: 'calendar.event_updated', room: ev.project_id ? rooms.project(ev.project_id) : rooms.company(), data: { eventId: id, cancelled: true } }])
   return c.json({ ok: true })
 })

@@ -230,8 +230,8 @@ export default function ProjectWorkspace() {
 
       {(tab === 'board' || tab === 'list') && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <Select className="w-44" value={taskFilter.responsible} onChange={(e) => setTaskFilter({ ...taskFilter, responsible: e.target.value })} aria-label="Filter by person"><option value="">Everyone</option>{d.members.map((m) => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</Select>
-          <Select className="w-48" value={taskFilter.milestone} onChange={(e) => setTaskFilter({ ...taskFilter, milestone: e.target.value })} aria-label="Filter by milestone"><option value="">All milestones</option>{d.milestones.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</Select>
+          <Select className="w-full sm:w-44" value={taskFilter.responsible} onChange={(e) => setTaskFilter({ ...taskFilter, responsible: e.target.value })} aria-label="Filter by person"><option value="">Everyone</option>{d.members.map((m) => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</Select>
+          <Select className="w-full sm:w-48" value={taskFilter.milestone} onChange={(e) => setTaskFilter({ ...taskFilter, milestone: e.target.value })} aria-label="Filter by milestone"><option value="">All milestones</option>{d.milestones.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</Select>
           <label className="flex items-center gap-2 text-[13px] text-ink-2"><input type="checkbox" className="accent-accent" checked={taskFilter.showDone} onChange={(e) => setTaskFilter({ ...taskFilter, showDone: e.target.checked })} /> Show completed</label>
         </div>
       )}

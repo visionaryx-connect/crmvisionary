@@ -271,7 +271,9 @@ portal.post('/feedback', async (c) => {
   const recipients = await projectReviewers(c.env.DB, input.projectId)
   const am = await one<{ account_manager_id: string | null }>(c.env.DB, 'SELECT account_manager_id FROM clients WHERE id = ?', p.clientId)
   await notify(c.env, c.executionCtx, [...new Set([...recipients, ...(am?.account_manager_id ? [am.account_manager_id] : [])])].map((u) => ({
-    userId: u, kind: 'client_feedback' as const, title: `Client ${input.kind.replace('_', ' ')}: ${project?.reference}`, body: input.body.slice(0, 160), link: `/projects/${input.projectId}?tab=feedback`, entityType: 'client_feedback', entityId: id,
+    userId: u, event: 'CLIENT_FEEDBACK_RECEIVED' as const, title: `Client ${input.kind.replace('_', ' ')}: ${project?.reference}`, body: input.body.slice(0, 160), link: `/projects/${input.projectId}?tab=feedback`, entityType: 'client_feedback', entityId: id, projectId: input.projectId,
+    priority: input.kind === 'revision_request' ? ('high' as const) : undefined,
+    email: { intro: `${input.authorName} sent ${input.kind === 'revision_request' ? 'a revision request' : input.kind === 'question' ? 'a question' : 'feedback'} through the client portal.`, details: [['Project', project?.reference ?? ''], ['From', input.authorName]], message: input.body, actionLabel: 'Open feedback' },
   })))
   publish(c.env, c.executionCtx, [
     { type: 'client.feedback_received', room: rooms.project(input.projectId), data: { projectId: input.projectId, feedbackId: id } },
@@ -320,7 +322,7 @@ portal.post('/deliverables/:id/decision', async (c) => {
     activity(c.env.DB, { actorType: 'client', actorId: p.clientId, action: input.decision === 'client_approved' ? 'deliverable.client_approved' : 'deliverable.client_changes_requested', entityType: 'deliverable', entityId: id, projectId: d.project_id, summary: `${input.authorName} (${p.verifiedEmail}) ${input.decision === 'client_approved' ? 'approved' : 'requested changes to'} “${d.title}”`, ip: clientIp(c) }),
   ])
   const recipients = await projectReviewers(c.env.DB, d.project_id)
-  await notify(c.env, c.executionCtx, recipients.map((u) => ({ userId: u, kind: 'client_feedback' as const, title: `Client ${input.decision === 'client_approved' ? 'approved' : 'requested changes to'} “${d.title}”`, body: input.note, link: `/projects/${d.project_id}?tab=deliverables` })))
+  await notify(c.env, c.executionCtx, recipients.map((u) => ({ userId: u, event: 'CLIENT_DELIVERABLE_DECISION' as const, title: `Client ${input.decision === 'client_approved' ? 'approved' : 'requested changes to'} “${d.title}”`, body: input.note, link: `/projects/${d.project_id}?tab=deliverables`, entityType: 'deliverable', entityId: id, projectId: d.project_id, email: { intro: `${input.authorName} ${input.decision === 'client_approved' ? 'approved' : 'requested changes to'} a deliverable in the client portal.`, details: [['Deliverable', d.title]], message: input.note } })))
   publish(c.env, c.executionCtx, [
     { type: 'client.feedback_received', room: rooms.project(d.project_id), data: { projectId: d.project_id, deliverableId: id } },
     { type: 'portal.project_updated', room: rooms.portalProject(d.project_id), data: { projectId: d.project_id } },

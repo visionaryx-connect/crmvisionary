@@ -283,14 +283,14 @@ export default function CalendarPage() {
           <button className="border-x border-line px-3 py-1.5 text-[12.5px] font-medium hover:bg-subtle" onClick={() => setAnchor(today)}>Today</button>
           <button className="px-2 py-1.5 hover:bg-subtle" onClick={() => step(1)} aria-label="Next"><ChevronRight className="size-4" /></button>
         </div>
-        <h2 className="min-w-[180px] font-display font-bold tracking-[-0.02em] text-[19px] text-ink">{title}</h2>
+        <h2 className="min-w-0 flex-1 font-display text-[17px] font-bold tracking-[-0.02em] text-ink sm:min-w-[180px] sm:flex-none sm:text-[19px]">{title}</h2>
         {q.isFetching && <Spinner />}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Select className="w-40 !h-8" value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Project filter"><option value="">All projects</option>{projects.data?.map((p) => <option key={p.id} value={p.id}>{p.reference} · {p.name}</option>)}</Select>
-          <Select className="w-36 !h-8" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} aria-label="Department filter"><option value="">All departments</option>{departments.data?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</Select>
-          <Select className="w-32 !h-8" value={scope} onChange={(e) => setScope(e.target.value as 'mine' | 'all')} aria-label="Task scope"><option value="mine">My tasks</option><option value="all">All tasks</option></Select>
-          <div className="flex rounded-md border border-line bg-surface p-0.5" role="group" aria-label="Calendar view">
-            {(['month', 'week', 'day', 'agenda'] as View[]).map((vw) => <button key={vw} onClick={() => setView(vw)} aria-pressed={view === vw} className={cx('rounded px-2.5 py-1 text-[12.5px] capitalize', view === vw ? 'bg-accent text-surface' : 'text-ink-2 hover:bg-subtle')}>{vw}</button>)}
+        <div className="grid w-full grid-cols-2 items-center gap-2 sm:ml-auto sm:flex sm:w-auto sm:flex-wrap">
+          <Select className="w-full !h-8 sm:w-40" value={projectId} onChange={(e) => setProjectId(e.target.value)} aria-label="Project filter"><option value="">All projects</option>{projects.data?.map((p) => <option key={p.id} value={p.id}>{p.reference} · {p.name}</option>)}</Select>
+          <Select className="w-full !h-8 sm:w-36" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} aria-label="Department filter"><option value="">All departments</option>{departments.data?.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</Select>
+          <Select className="w-full !h-8 sm:w-32" value={scope} onChange={(e) => setScope(e.target.value as 'mine' | 'all')} aria-label="Task scope"><option value="mine">My tasks</option><option value="all">All tasks</option></Select>
+          <div className="col-span-2 grid grid-cols-4 rounded-md border border-line bg-surface p-0.5 sm:col-span-1 sm:flex" role="group" aria-label="Calendar view">
+            {(['month', 'week', 'day', 'agenda'] as View[]).map((vw) => <button key={vw} onClick={() => setView(vw)} aria-pressed={view === vw} className={cx('rounded px-1.5 py-1 text-[12.5px] capitalize sm:px-2.5', view === vw ? 'bg-accent text-surface' : 'text-ink-2 hover:bg-subtle')}>{vw}</button>)}
           </div>
         </div>
       </div>

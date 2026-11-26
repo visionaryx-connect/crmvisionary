@@ -24,9 +24,9 @@ export default function Audit() {
     <div>
       <PageHeader eyebrow="Administration" title="Security & audit log" meta={<span>Immutable record of sign-ins, permission changes, data changes and client portal access.</span>} actions={can('data.export') && <a href="/api/admin/export"><Button icon={<Download className="size-4" />}>Export company data</Button></a>} />
       <div className="mb-4 flex flex-wrap gap-2">
-        <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-44" aria-label="Category"><option value="security">Security events</option><option value="admin">Administrative changes</option><option value="activity">Work activity</option><option value="">Everything</option></Select>
-        <div className="relative w-full max-w-sm"><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-faint" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search summaries and actions" className="pl-8" aria-label="Search log" /></div>
-        {rows.length > 0 && <Button variant="ghost" className="ml-auto" icon={<Download className="size-4" />} onClick={() => download('audit-log.json', JSON.stringify(rows, null, 1), 'application/json')}>Download shown</Button>}
+        <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full sm:w-44" aria-label="Category"><option value="security">Security events</option><option value="admin">Administrative changes</option><option value="activity">Work activity</option><option value="">Everything</option></Select>
+        <div className="relative w-full sm:max-w-sm"><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-faint" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search summaries and actions" className="pl-8" aria-label="Search log" /></div>
+        {rows.length > 0 && <Button variant="ghost" className="w-full sm:ml-auto sm:w-auto" icon={<Download className="size-4" />} onClick={() => download('audit-log.json', JSON.stringify(rows, null, 1), 'application/json')}>Download shown</Button>}
       </div>
       {list.isLoading ? <SkeletonRows rows={10} /> : list.error ? <ErrorState error={list.error} /> : rows.length === 0 ? <EmptyState title="No log entries match" /> : (
         <>
